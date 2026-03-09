@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-stone-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}subsd{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        bitcoin: {
+                            50: '#fff8ed',
+                            100: '#ffefd4',
+                            200: '#ffdba8',
+                            300: '#ffc170',
+                            400: '#ff9c37',
+                            500: '#f97316',
+                            600: '#ea580c',
+                            700: '#c2410c',
+                            800: '#9a3412',
+                            900: '#7c2d12',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace; }
+    </style>
+</head>
+<body class="h-full">
+    <div class="min-h-full pb-12">
+        <!-- Navigation -->
+        <nav class="bg-white border-b border-gray-200">
+            <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                <div class="flex h-14 items-center justify-between">
+                    <div class="flex items-center">
+                        <a href="/" class="text-xl font-bold text-bitcoin-600">subs</a>
+                        <div class="ml-10 flex items-baseline space-x-1">
+                            <a href="/" class="{% block nav_dashboard %}text-gray-600 hover:text-bitcoin-600{% endblock %} px-3 py-2 text-sm font-medium transition-colors">Dashboard</a>
+                            <a href="/ui/operate" class="{% block nav_operate %}text-gray-600 hover:text-bitcoin-600{% endblock %} px-3 py-2 text-sm font-medium transition-colors">Operate</a>
+                            <a href="/ui/requests" class="{% block nav_requests %}text-gray-600 hover:text-bitcoin-600{% endblock %} px-3 py-2 text-sm font-medium transition-colors">Requests</a>
+                            <a href="/ui/certs" class="{% block nav_certs %}text-gray-600 hover:text-bitcoin-600{% endblock %} px-3 py-2 text-sm font-medium transition-colors">Certificates</a>
+                            <a href="/ui/settings" class="{% block nav_settings %}text-gray-600 hover:text-bitcoin-600{% endblock %} px-3 py-2 text-sm font-medium transition-colors">Settings</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main content -->
+        <main>
+            <div class="mx-auto max-w-7xl py-6 px-4 sm:px-6 lg:px-8">
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+    </div>
+
+    <!-- RPC Console (Fixed Footer) -->
+    <div id="rpc-console" class="fixed bottom-0 left-0 right-0 bg-gray-900 transition-all duration-200 z-50">
+        <!-- Header (always visible, clickable to toggle) -->
+        <div onclick="toggleConsole()" class="flex items-center justify-between px-4 py-2 cursor-pointer hover:bg-gray-800">
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2">
+                    <svg id="console-chevron" class="w-4 h-4 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path>
+                    </svg>
+                    <span class="text-sm font-medium text-white">Console</span>
+                </div>
+                <!-- Status -->
+                <div id="status-bar" class="flex items-center gap-4 text-xs text-gray-400">
+                    <span id="status-wallet" class="text-gray-300"></span>
+                    <span id="status-balance"></span>
+                    <span id="status-chain"></span>
+                    <span id="status-sync"></span>
+                </div>
+            </div>
+            <!-- Quick Actions in header -->
+            <div class="flex flex-wrap items-center gap-2" onclick="event.stopPropagation()">
+                <div class="flex space-x-1">
+                    <button id="btn-spaced" onclick="selectEndpoint('spaced')" class="px-2 py-0.5 rounded text-xs font-medium bg-bitcoin-500 text-white">
+                        Spaced
+                    </button>
+                    <button id="btn-bitcoin" onclick="selectEndpoint('bitcoin')" class="px-2 py-0.5 rounded text-xs font-medium bg-gray-700 text-gray-300 hover:bg-gray-600" style="display: none;">
+                        Bitcoin
+                    </button>
+                </div>
+                <span class="text-gray-700">|</span>
+                <button onclick="fillCmd('getserverinfo', [])" class="px-2 py-0.5 rounded text-xs bg-gray-700 text-gray-300 hover:bg-gray-600">serverinfo</button>
+                <button onclick="fillCmd('getspace', ['@space'])" class="px-2 py-0.5 rounded text-xs bg-gray-700 text-gray-300 hover:bg-gray-600">getspace</button>
+                <button onclick="fillCmd('walletlistspaces', [walletName])" class="px-2 py-0.5 rounded text-xs bg-gray-700 text-gray-300 hover:bg-gray-600">listspaces</button>
+                <button onclick="fillCmd('walletgetbalance', [walletName])" class="px-2 py-0.5 rounded text-xs bg-gray-700 text-gray-300 hover:bg-gray-600">balance</button>
+                <button onclick="fillCmd('walletgetnewaddress', [walletName, 'Coin'])" class="px-2 py-0.5 rounded text-xs bg-gray-700 text-gray-300 hover:bg-gray-600">newaddr</button>
+                <button onclick="fillDelegate()" class="px-2 py-0.5 rounded text-xs bg-gray-700 text-gray-300 hover:bg-gray-600">delegate</button>
+                <div id="mine-action" class="flex items-center gap-1" style="display: none;">
+                    <span class="text-gray-700">|</span>
+                    <input type="text" id="mine-count" value="1" onclick="event.stopPropagation()" class="w-8 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white text-xs text-center">
+                    <button onclick="mineBlocks()" class="px-2 py-0.5 rounded text-xs bg-gray-700 text-gray-300 hover:bg-gray-600">mine</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Collapsible body -->
+        <div id="console-body" class="hidden px-4 pb-4">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">Method</label>
+                        <input type="text" id="rpc-method" placeholder="e.g. getserverinfo, getspace, walletlistspaces"
+                            class="w-full bg-gray-800 rounded-sm px-3 py-2 text-white mono text-sm focus:outline-none focus:ring-1 focus:ring-bitcoin-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">Params (JSON)</label>
+                        <textarea id="rpc-params" placeholder='e.g. ["@bitcoin"] or ["wallet_99"]' rows="5"
+                            class="w-full bg-gray-800 rounded-sm px-3 py-2 text-white mono text-sm focus:outline-none focus:ring-1 focus:ring-bitcoin-500"></textarea>
+                    </div>
+                    <button onclick="sendRpcCommand()" class="w-full rounded-sm bg-bitcoin-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-bitcoin-600">
+                        Send
+                    </button>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Response</label>
+                    <pre id="rpc-response" class="bg-gray-800 rounded-sm p-3 text-sm text-gray-300 mono overflow-x-auto h-48 overflow-y-auto whitespace-pre-wrap">No response yet</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // RPC Console
+    let selectedEndpoint = 'spaced';
+    let endpoints = { spaced: null, bitcoin: null };
+    let walletName = 'wallet';
+
+    // Toggle console visibility
+    function toggleConsole() {
+        const body = document.getElementById('console-body');
+        const chevron = document.getElementById('console-chevron');
+        body.classList.toggle('hidden');
+        chevron.style.transform = body.classList.contains('hidden') ? '' : 'rotate(180deg)';
+    }
+
+    // Fill command fields
+    function fillCmd(method, params) {
+        document.getElementById('rpc-method').value = method;
+        document.getElementById('rpc-params').value = JSON.stringify(params);
+        // Open console if closed
+        const body = document.getElementById('console-body');
+        if (body.classList.contains('hidden')) {
+            toggleConsole();
+        }
+    }
+
+    function fillDelegate() {
+        document.getElementById('rpc-method').value = 'walletsendrequest';
+        document.getElementById('rpc-params').value = JSON.stringify([
+            walletName,
+            {
+                "requests": [{"request": "delegate", "space": "@space"}],
+                "fee_rate": null,
+                "force": false,
+                "confirmed_only": false,
+                "skip_tx_check": false
+            }
+        ], null, 2);
+        // Open console if closed
+        const body = document.getElementById('console-body');
+        if (body.classList.contains('hidden')) {
+            toggleConsole();
+        }
+    }
+
+    // Mine blocks (test-rig only)
+    async function mineBlocks() {
+        const count = parseInt(document.getElementById('mine-count').value) || 1;
+        document.getElementById('rpc-response').textContent = `Mining ${count} block(s)...`;
+        // Open console if closed
+        const body = document.getElementById('console-body');
+        if (body.classList.contains('hidden')) {
+            toggleConsole();
+        }
+
+        try {
+            const response = await fetch('/rpc/mine', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ count })
+            });
+
+            const result = await response.json();
+            document.getElementById('rpc-response').textContent = JSON.stringify(result, null, 2);
+
+            // Refresh page after successful mining
+            if (response.ok) {
+                setTimeout(() => location.reload(), 500);
+            }
+        } catch (e) {
+            document.getElementById('rpc-response').textContent = `Error: ${e.message}`;
+        }
+    }
+
+    async function initRpcConsole() {
+        try {
+            const response = await fetch('/rpc/endpoints');
+            endpoints = await response.json();
+
+            // Set wallet name
+            if (endpoints.wallet) {
+                walletName = endpoints.wallet;
+            }
+
+            // Update status bar
+            document.getElementById('status-wallet').textContent = endpoints.wallet;
+            document.getElementById('status-balance').textContent = `${endpoints.balance_sats.toLocaleString()} sats`;
+            document.getElementById('status-chain').textContent = `${endpoints.network} ${endpoints.tip_height}/${endpoints.chain_height}`;
+            document.getElementById('status-sync').textContent = endpoints.synced ? 'Synced' : 'Syncing...';
+            document.getElementById('status-sync').className = endpoints.synced ? 'text-green-400' : 'text-yellow-400';
+
+            // Show bitcoin button and mine action if available
+            if (endpoints.bitcoin) {
+                document.getElementById('btn-bitcoin').style.display = 'inline-flex';
+                document.getElementById('mine-action').style.display = 'flex';
+            }
+        } catch (e) {
+            console.error('Failed to fetch RPC endpoints:', e);
+        }
+    }
+
+    function selectEndpoint(endpoint) {
+        selectedEndpoint = endpoint;
+
+        // Update button styles
+        const btnSpaced = document.getElementById('btn-spaced');
+        const btnBitcoin = document.getElementById('btn-bitcoin');
+
+        if (endpoint === 'spaced') {
+            btnSpaced.className = 'px-2 py-0.5 rounded text-xs font-medium bg-bitcoin-500 text-white';
+            btnBitcoin.className = 'px-2 py-0.5 rounded text-xs font-medium bg-gray-700 text-gray-300 hover:bg-gray-600';
+        } else {
+            btnSpaced.className = 'px-2 py-0.5 rounded text-xs font-medium bg-gray-700 text-gray-300 hover:bg-gray-600';
+            btnBitcoin.className = 'px-2 py-0.5 rounded text-xs font-medium bg-bitcoin-500 text-white';
+        }
+    }
+
+    async function sendRpcCommand() {
+        const method = document.getElementById('rpc-method').value.trim();
+        const paramsStr = document.getElementById('rpc-params').value.trim();
+        const responseEl = document.getElementById('rpc-response');
+
+        if (!method) {
+            responseEl.textContent = 'Error: Method is required';
+            return;
+        }
+
+        let params = [];
+        if (paramsStr) {
+            try {
+                params = JSON.parse(paramsStr);
+            } catch (e) {
+                responseEl.textContent = `Error: Invalid JSON params - ${e.message}`;
+                return;
+            }
+        }
+
+        responseEl.textContent = 'Sending...';
+
+        try {
+            const response = await fetch(`/rpc/${selectedEndpoint}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ method, params })
+            });
+
+            const result = await response.json();
+            responseEl.textContent = JSON.stringify(result, null, 2);
+        } catch (e) {
+            responseEl.textContent = `Error: ${e.message}`;
+        }
+    }
+
+    // Initialize console on page load
+    initRpcConsole();
+    </script>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

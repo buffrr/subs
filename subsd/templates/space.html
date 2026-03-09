@@ -1,0 +1,494 @@
+{% extends "base.html" %}
+
+{% block title %}{{ space.space }} - subsd{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <a href="/" class="text-sm text-gray-500 hover:text-gray-700 transition-colors">&larr; Back</a>
+            <h1 class="text-xl font-semibold text-gray-900 mono mt-1">{{ space.space }}</h1>
+        </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+        <div class="bg-white rounded-sm shadow-sm p-4">
+            <dt class="text-xs text-gray-500 uppercase tracking-wide">Total Handles</dt>
+            <dd class="mt-1 text-2xl font-semibold text-gray-900">{{ space.total_handles }}</dd>
+        </div>
+        <div class="bg-white rounded-sm shadow-sm p-4">
+            <dt class="text-xs text-gray-500 uppercase tracking-wide">Committed</dt>
+            <dd class="mt-1 text-2xl font-semibold text-green-600">{{ space.committed_handles }}</dd>
+        </div>
+        <div class="bg-white rounded-sm shadow-sm p-4">
+            <dt class="text-xs text-gray-500 uppercase tracking-wide">Staged</dt>
+            <dd class="mt-1 text-2xl font-semibold {% if space.staged_handles > 0 %}text-orange-500{% else %}text-gray-400{% endif %}">{{ space.staged_handles }}</dd>
+        </div>
+        <div class="bg-white rounded-sm shadow-sm p-4">
+            <dt class="text-xs text-gray-500 uppercase tracking-wide">Commitments</dt>
+            <dd class="mt-1 text-2xl font-semibold text-gray-900">{{ space.commitments }}</dd>
+        </div>
+        <div class="bg-white rounded-sm shadow-sm p-4">
+            <dt class="text-xs text-gray-500 uppercase tracking-wide">STARK</dt>
+            <dd class="mt-1 text-2xl font-semibold {% if space.has_receipt %}text-green-600{% else %}text-gray-300{% endif %}">
+                {% if space.has_receipt %}Yes{% else %}No{% endif %}
+            </dd>
+        </div>
+        <div class="bg-white rounded-sm shadow-sm p-4">
+            <dt class="text-xs text-gray-500 uppercase tracking-wide">SNARK</dt>
+            <dd class="mt-1 text-2xl font-semibold {% if space.has_groth16 %}text-green-600{% else %}text-gray-300{% endif %}">
+                {% if space.has_groth16 %}Yes{% else %}No{% endif %}
+            </dd>
+        </div>
+    </div>
+
+    <!-- Commitment Pipeline -->
+    <div class="bg-white rounded-sm shadow-sm p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">Commitment Pipeline</h2>
+            <button onclick="refreshPipeline()" class="text-xs text-gray-500 hover:text-gray-700 transition-colors">Refresh</button>
+        </div>
+        <div id="pipelineStepper" class="text-gray-600">Loading...</div>
+        <div id="pipelineMessage" class="mt-3 text-sm text-gray-500"></div>
+        <div id="pipelineActions" class="mt-4"></div>
+        <div id="provingEndpoint" class="mt-3 text-xs"></div>
+    </div>
+
+    <!-- Handles Table -->
+    <div class="bg-white rounded-sm shadow-sm p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">Handles</h2>
+            <div id="handlesPagination" class="flex items-center gap-2 text-sm">
+                <!-- Pagination controls will be inserted here -->
+            </div>
+        </div>
+        <div id="handlesTable" class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-gray-200">
+                        <th class="text-left py-2 px-3 text-gray-500 font-medium">Handle</th>
+                        <th class="text-left py-2 px-3 text-gray-500 font-medium">Script Pubkey</th>
+                        <th class="text-left py-2 px-3 text-gray-500 font-medium">Status</th>
+                    </tr>
+                </thead>
+                <tbody id="handlesBody" class="divide-y divide-gray-100">
+                    <tr><td colspan="3" class="py-4 text-center text-gray-400">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Actions Log -->
+    <div class="bg-white rounded-sm shadow-sm p-6">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Activity Log</h2>
+        <div id="actionsLog" class="space-y-1 text-sm text-gray-600 mono max-h-48 overflow-y-auto">
+            <p class="text-gray-400">No activity yet</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const space = '{{ space.space }}';
+
+async function refreshPipeline() {
+    try {
+        const response = await fetch(`/spaces/${encodeURIComponent(space)}/pipeline`);
+        const result = await response.json();
+
+        // Store pipeline for handle status rendering
+        currentPipeline = result;
+
+        const stepperEl = document.getElementById('pipelineStepper');
+        const msgEl = document.getElementById('pipelineMessage');
+        const actionsEl = document.getElementById('pipelineActions');
+        const provingEl = document.getElementById('provingEndpoint');
+
+        // If no pending commitment, show staging view
+        if (!result.has_pending) {
+            const stagedCount = result.staged_count || 0;
+            if (stagedCount > 0) {
+                stepperEl.innerHTML = `<div class="text-gray-600">${stagedCount} handle(s) staged and ready to commit.</div>`;
+                actionsEl.innerHTML = `<div class="flex gap-2">
+                    <button onclick="commitLocal()" class="rounded-sm bg-bitcoin-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-bitcoin-600 transition-colors">
+                        Commit Local (${stagedCount} staged)
+                    </button>
+                    <button onclick="publishStaged()" class="rounded-sm bg-gray-700 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-800 transition-colors">
+                        Publish Staged Certs
+                    </button>
+                </div>`;
+            } else {
+                stepperEl.innerHTML = `<div class="text-gray-500">Stage handles to start a new commitment.</div>`;
+                actionsEl.innerHTML = '';
+            }
+            msgEl.textContent = '';
+            provingEl.innerHTML = '';
+            // Refresh handles to update their status
+            loadHandles(currentPage);
+            return;
+        }
+
+        // Show pipeline stepper for pending commitment
+        renderPipelineStepper(result);
+        msgEl.textContent = result.message || '';
+        renderPipelineActions(result);
+
+        // Show proving endpoints if proving is in progress
+        if (result.steps.proving === 'in_progress') {
+            provingEl.innerHTML = `
+                <div class="space-y-1">
+                    <div><span class="text-gray-500">Get proof request:</span> <a href="/spaces/${encodeURIComponent(space)}/proving/next" target="_blank" class="text-bitcoin-600 hover:underline mono">GET /spaces/${space}/proving/next</a></div>
+                    <div><span class="text-gray-500">Submit receipt:</span> <span class="text-bitcoin-600 mono">POST /spaces/${space}/proving/fulfill</span></div>
+                </div>
+            `;
+        } else {
+            provingEl.innerHTML = '';
+        }
+
+        // Refresh handles to update their status
+        loadHandles(currentPage);
+    } catch (e) {
+        document.getElementById('pipelineStepper').innerHTML = `<span class="text-red-600">Error: ${e.message}</span>`;
+    }
+}
+
+function renderPipelineActions(result) {
+    const actionsEl = document.getElementById('pipelineActions');
+    let html = '';
+
+    // Show broadcast button if we're at broadcast step
+    if (result.current_step === 'broadcast') {
+        html += `<button onclick="broadcast()" class="rounded-sm bg-bitcoin-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-bitcoin-600 transition-colors">
+            Broadcast On-Chain
+        </button>`;
+    }
+
+    // Show publish button when finalized but not yet published
+    if (result.steps.published === 'in_progress') {
+        html += `<button onclick="publishCerts()" class="rounded-sm bg-green-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-green-700 transition-colors">
+            Publish Certificates
+        </button>`;
+    }
+
+    actionsEl.innerHTML = html;
+}
+
+function renderPipelineStepper(result) {
+    const steps = [
+        { key: 'local', label: 'Local' },
+        { key: 'proving', label: 'Proving' },
+        { key: 'broadcast', label: 'Broadcast' },
+        { key: 'confirmed', label: 'Confirmed' },
+        { key: 'finalized', label: 'Finalized' },
+        { key: 'published', label: 'Published' }
+    ];
+
+    let html = '<div class="flex items-center gap-2">';
+
+    steps.forEach((step, i) => {
+        const state = result.steps[step.key];
+
+        // Skip if skipped (e.g., proving for initial commit)
+        if (state === 'skipped') return;
+
+        // Add connector (except before first visible step)
+        if (i > 0 && result.steps[steps[i-1].key] !== 'skipped') {
+            const prevState = result.steps[steps[i-1].key];
+            const connectorColor = prevState === 'complete' ? 'bg-green-400' : 'bg-gray-200';
+            html += `<div class="w-8 h-0.5 ${connectorColor}"></div>`;
+        }
+
+        // Step circle and label
+        let circleClass, labelClass, icon;
+        if (state === 'complete') {
+            circleClass = 'bg-green-500 text-white';
+            labelClass = 'text-green-600 font-medium';
+            icon = '✓';
+        } else if (state === 'in_progress') {
+            circleClass = 'bg-bitcoin-500 text-white animate-pulse';
+            labelClass = 'text-bitcoin-600 font-medium';
+            icon = '●';
+        } else {
+            circleClass = 'bg-gray-200 text-gray-400';
+            labelClass = 'text-gray-400';
+            icon = '○';
+        }
+
+        html += `
+            <div class="flex flex-col items-center">
+                <div class="w-8 h-8 rounded-full ${circleClass} flex items-center justify-center text-sm">${icon}</div>
+                <span class="text-xs mt-1 ${labelClass}">${step.label}</span>
+            </div>
+        `;
+    });
+
+    html += '</div>';
+
+    // Show commitment details if available
+    if (result.commitment_idx !== null && result.commitment_idx !== undefined) {
+        html += `<div class="mt-4 space-y-2 text-xs font-mono">`;
+        html += `<div class="text-gray-500">Commitment #${result.commitment_idx}</div>`;
+        if (result.root) {
+            html += `<div><span class="text-gray-400">Root:</span> <span class="text-gray-700 select-all">${result.root}</span></div>`;
+        }
+        if (result.txid) {
+            html += `<div><span class="text-gray-400">Txid:</span> <span class="text-gray-700 select-all">${result.txid}</span></div>`;
+        }
+        html += `</div>`;
+    }
+
+    document.getElementById('pipelineStepper').innerHTML = html;
+}
+
+async function commitLocal() {
+    logAction('Committing local...');
+    try {
+        const response = await fetch(`/spaces/${encodeURIComponent(space)}/commit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dry_run: false })
+        });
+        const result = await response.json();
+
+        if (response.ok) {
+            logAction(`Committed ${result.handles_committed} handles. Root: ${result.root.slice(0, 16)}...`);
+            location.reload();
+        } else {
+            logAction(`Error: ${JSON.stringify(result)}`);
+        }
+    } catch (e) {
+        logAction(`Error: ${e.message}`);
+    }
+}
+
+async function broadcast() {
+    // Try to fetch recommended fees
+    let fees = null;
+    try {
+        const feesResponse = await fetch('/fees');
+        if (feesResponse.ok) {
+            fees = await feesResponse.json();
+        }
+    } catch (e) {
+        // Ignore - fees will be null
+    }
+
+    // Build fee selection prompt
+    let promptMsg = 'Enter fee rate (sat/vB):\n\n';
+    if (fees) {
+        promptMsg += `Recommended rates from mempool.space:\n`;
+        promptMsg += `  Fastest (10 min): ${fees.fastestFee} sat/vB\n`;
+        promptMsg += `  Half hour: ${fees.halfHourFee} sat/vB\n`;
+        promptMsg += `  Hour: ${fees.hourFee} sat/vB\n`;
+        promptMsg += `  Economy: ${fees.economyFee} sat/vB\n\n`;
+    } else {
+        promptMsg += `Could not fetch recommended rates from mempool.space.\n\n`;
+    }
+    promptMsg += `Enter fee rate (leave empty to let wallet estimate):`;
+
+    const input = prompt(promptMsg);
+    if (input === null) return; // User cancelled
+
+    const feeRate = input.trim() === '' ? null : parseFloat(input);
+
+    logAction(`Broadcasting to chain${feeRate ? ` at ${feeRate} sat/vB` : ' (wallet estimate)'}...`);
+    try {
+        const body = feeRate ? { fee_rate: feeRate } : {};
+        const response = await fetch(`/spaces/${encodeURIComponent(space)}/broadcast`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const result = await response.json();
+
+        if (response.ok) {
+            logAction(`Broadcast successful. TX: ${result.txid}`);
+            refreshPipeline();
+        } else {
+            logAction(`Error: ${result.error || JSON.stringify(result)}`);
+        }
+    } catch (e) {
+        logAction(`Error: ${e.message}`);
+    }
+}
+
+async function publishStaged() {
+    logAction('Publishing staged certificates...');
+    try {
+        const response = await fetch(`/spaces/${encodeURIComponent(space)}/publish/staged`, {
+            method: 'POST'
+        });
+        const result = await response.json();
+
+        if (response.ok) {
+            if (result.handles_published > 0) {
+                logAction(`Published ${result.handles_published} staged cert(s).`);
+            } else {
+                logAction('No unpublished staged handles.');
+            }
+            refreshPipeline();
+        } else {
+            logAction(`Error: ${result.error || JSON.stringify(result)}`);
+        }
+    } catch (e) {
+        logAction(`Error: ${e.message}`);
+    }
+}
+
+async function publishCerts() {
+    logAction('Publishing final certificates...');
+    try {
+        const response = await fetch(`/spaces/${encodeURIComponent(space)}/publish`, {
+            method: 'POST'
+        });
+        const result = await response.json();
+
+        if (response.ok) {
+            if (result.handles_published > 0) {
+                logAction(`Published ${result.handles_published} final cert(s).`);
+            } else {
+                logAction('No unpublished handles.');
+            }
+            refreshPipeline();
+        } else {
+            logAction(`Error: ${result.error || JSON.stringify(result)}`);
+        }
+    } catch (e) {
+        logAction(`Error: ${e.message}`);
+    }
+}
+
+function logAction(message) {
+    const log = document.getElementById('actionsLog');
+    const time = new Date().toLocaleTimeString();
+    const entry = document.createElement('p');
+    entry.textContent = `[${time}] ${message}`;
+    log.insertBefore(entry, log.firstChild);
+
+    // Remove placeholder
+    const placeholder = log.querySelector('.text-gray-500');
+    if (placeholder && placeholder.textContent === 'No actions yet') {
+        placeholder.remove();
+    }
+}
+
+// Handles pagination state
+let currentPage = 1;
+const perPage = 20;
+let currentPipeline = null; // Store pipeline status for handle rendering
+
+async function loadHandles(page = 1) {
+    currentPage = page;
+    try {
+        const response = await fetch(`/spaces/${encodeURIComponent(space)}/handles?page=${page}&per_page=${perPage}`);
+        const result = await response.json();
+
+        renderHandlesTable(result);
+        renderPagination(result);
+    } catch (e) {
+        document.getElementById('handlesBody').innerHTML =
+            `<tr><td colspan="3" class="py-4 text-center text-red-600">Error: ${e.message}</td></tr>`;
+    }
+}
+
+function getHandleStatusBadge(handle) {
+    const publishBadge = getPublishBadge(handle.publish_status);
+
+    // No commitment_root = staged
+    if (!handle.commitment_root) {
+        return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">Staged</span>' + publishBadge;
+    }
+
+    // Check if handle is in the current pipeline's commitment
+    if (currentPipeline && currentPipeline.root === handle.commitment_root) {
+        // Show pipeline status
+        const steps = currentPipeline.steps;
+        if (steps.finalized === 'complete') {
+            return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">Finalized</span>' + publishBadge;
+        } else if (steps.confirmed === 'complete' || steps.confirmed === 'in_progress') {
+            return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-bitcoin-100 text-bitcoin-600 animate-pulse">Confirming</span>' + publishBadge;
+        } else if (steps.broadcast === 'complete' || steps.broadcast === 'in_progress') {
+            return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-bitcoin-100 text-bitcoin-600 animate-pulse">Broadcast</span>' + publishBadge;
+        } else if (steps.proving === 'in_progress') {
+            return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-bitcoin-100 text-bitcoin-600 animate-pulse">Proving</span>' + publishBadge;
+        } else {
+            return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-bitcoin-100 text-bitcoin-600 animate-pulse">Pending</span>' + publishBadge;
+        }
+    }
+
+    // Different commitment_root = must be from a finalized commitment
+    return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">Finalized</span>' + publishBadge;
+}
+
+function getPublishBadge(publishStatus) {
+    if (publishStatus === 'final') {
+        return ' <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">Published</span>';
+    } else if (publishStatus === 'temp') {
+        return ' <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-600">Temp Cert</span>';
+    }
+    return '';
+}
+
+function renderHandlesTable(result) {
+    const tbody = document.getElementById('handlesBody');
+
+    if (result.handles.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="py-4 text-center text-gray-400">No handles registered</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = result.handles.map(handle => `
+        <tr class="hover:bg-gray-50">
+            <td class="py-2 px-3 mono text-gray-900">${escapeHtml(handle.name)}</td>
+            <td class="py-2 px-3 mono text-gray-600 text-xs">
+                <span title="${handle.script_pubkey}">${handle.script_pubkey.slice(0, 16)}...${handle.script_pubkey.slice(-8)}</span>
+            </td>
+            <td class="py-2 px-3">
+                ${getHandleStatusBadge(handle)}
+            </td>
+        </tr>
+    `).join('');
+}
+
+function renderPagination(result) {
+    const container = document.getElementById('handlesPagination');
+
+    if (result.total_pages <= 1) {
+        container.innerHTML = `<span class="text-gray-500">${result.total} handle${result.total !== 1 ? 's' : ''}</span>`;
+        return;
+    }
+
+    let html = `<span class="text-gray-500">${result.total} handles</span>`;
+    html += '<div class="flex items-center gap-1 ml-4">';
+
+    // Previous button
+    html += `<button onclick="loadHandles(${currentPage - 1})"
+        class="px-2 py-1 rounded text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+        ${currentPage <= 1 ? 'disabled' : ''}>&larr;</button>`;
+
+    // Page indicator
+    html += `<span class="px-2 text-gray-700">${result.page} / ${result.total_pages}</span>`;
+
+    // Next button
+    html += `<button onclick="loadHandles(${currentPage + 1})"
+        class="px-2 py-1 rounded text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+        ${currentPage >= result.total_pages ? 'disabled' : ''}>&rarr;</button>`;
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Initial load
+refreshPipeline();
+loadHandles();
+</script>
+{% endblock %}

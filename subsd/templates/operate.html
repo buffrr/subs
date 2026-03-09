@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Operate Space - subsd{% endblock %}
+
+{% block nav_operate %}text-bitcoin-600 font-semibold{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div>
+        <a href="/" class="text-sm text-gray-500 hover:text-gray-700 transition-colors">&larr; Back</a>
+        <h1 class="text-xl font-semibold text-gray-900 mt-1">Operate a Space</h1>
+    </div>
+
+    <!-- Delegation instructions -->
+    <div class="bg-white rounded-sm shadow-sm p-6">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">Delegation Required</h2>
+        <p class="text-sm text-gray-600 mb-4">
+            To operate a space, the owner must delegate it to this operator's address.
+        </p>
+
+        <div class="mb-6">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Operator Space Address</label>
+            <div class="flex">
+                <input type="text" readonly value="{{ space_address }}"
+                    class="flex-1 rounded-sm rounded-r-none border border-gray-200 bg-stone-50 text-gray-900 sm:text-sm px-3 py-2.5 mono">
+                <button onclick="copyAddress('{{ space_address }}')" class="rounded-sm rounded-l-none bg-gray-100 px-4 text-gray-600 hover:bg-gray-200 text-sm transition-colors border border-l-0 border-gray-200">
+                    Copy
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-stone-50 rounded-sm p-4">
+            <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Using space-cli</p>
+            <pre class="text-sm text-gray-700 mono overflow-x-auto">space-cli delegate @example --to {{ space_address }}</pre>
+        </div>
+    </div>
+
+    <!-- Add space form -->
+    <div class="bg-white rounded-sm shadow-sm p-6">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">Add Space</h2>
+        <form id="operateForm" class="space-y-4">
+            <div>
+                <label for="spaceName" class="block text-sm font-medium text-gray-700 mb-1">Space Name</label>
+                <input type="text" id="spaceName" name="space" placeholder="@example"
+                    class="block w-full rounded-sm border border-gray-200 bg-white shadow-inner focus:border-bitcoin-500 focus:ring-1 focus:ring-bitcoin-500 sm:text-sm px-3 py-2.5"
+                    required>
+                <p class="mt-1.5 text-xs text-gray-500">Enter the space name including @ (e.g., @example)</p>
+            </div>
+
+            <button type="submit" class="rounded-sm bg-bitcoin-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-bitcoin-600 transition-colors">
+                Check & Operate
+            </button>
+        </form>
+
+        <!-- Result -->
+        <div id="operateResult" class="hidden mt-4 p-4 rounded-sm"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyAddress(address) {
+    navigator.clipboard.writeText(address).then(() => {
+        // Could show a toast here
+    });
+}
+
+document.getElementById('operateForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const space = document.getElementById('spaceName').value.trim();
+    const resultDiv = document.getElementById('operateResult');
+
+    if (!space.startsWith('@')) {
+        resultDiv.className = 'mt-4 p-4 rounded-sm bg-red-50 text-red-700';
+        resultDiv.textContent = 'Space name must start with @';
+        resultDiv.classList.remove('hidden');
+        return;
+    }
+
+    resultDiv.className = 'mt-4 p-4 rounded-sm bg-stone-50 text-gray-600';
+    resultDiv.textContent = 'Checking delegation...';
+    resultDiv.classList.remove('hidden');
+
+    try {
+        const response = await fetch(`/spaces/${encodeURIComponent(space)}/operate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            resultDiv.className = 'mt-4 p-4 rounded-sm bg-green-50 text-green-700';
+            resultDiv.innerHTML = `Space <span class="font-medium mono">${space}</span> is now being operated. <a href="/ui/spaces/${encodeURIComponent(space)}" class="underline">View space</a>`;
+        } else {
+            resultDiv.className = 'mt-4 p-4 rounded-sm bg-red-50 text-red-700';
+            resultDiv.textContent = result.error || 'Failed to operate space';
+        }
+    } catch (e) {
+        resultDiv.className = 'mt-4 p-4 rounded-sm bg-red-50 text-red-700';
+        resultDiv.textContent = `Error: ${e.message}`;
+    }
+});
+</script>
+{% endblock %}

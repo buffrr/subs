@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - subsd{% endblock %}
+
+{% block nav_dashboard %}text-bitcoin-600 font-semibold{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+        <h1 class="text-xl font-semibold text-gray-900">Spaces</h1>
+        <button onclick="location.reload()" class="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 transition-colors">
+            <svg class="mr-1.5 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            Refresh
+        </button>
+    </div>
+
+    {% if spaces.is_empty() %}
+    <!-- Empty state -->
+    <div class="text-center py-12 bg-white rounded-sm shadow-sm">
+        <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
+        </svg>
+        <h3 class="mt-3 text-sm font-medium text-gray-900">No spaces yet</h3>
+        <p class="mt-1 text-sm text-gray-500">Get started by operating a space.</p>
+        <div class="mt-6">
+            <a href="/ui/operate" class="inline-flex items-center rounded-sm bg-bitcoin-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-bitcoin-600 transition-colors">
+                Operate Space
+            </a>
+        </div>
+    </div>
+    {% else %}
+    <!-- Spaces grid -->
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {% for space in spaces %}
+        <a href="/ui/spaces/{{ space.space }}" class="block bg-white rounded-sm shadow-sm p-5 hover:shadow transition-shadow">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-medium text-gray-900 mono">{{ space.space }}</h3>
+                {% if space.has_groth16 %}
+                <span class="inline-flex items-center rounded-sm bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">SNARK</span>
+                {% else if space.has_receipt %}
+                <span class="inline-flex items-center rounded-sm bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">STARK</span>
+                {% endif %}
+            </div>
+
+            <dl class="mt-3 flex gap-6 text-sm">
+                <div>
+                    <dt class="text-gray-500">Handles</dt>
+                    <dd class="font-medium text-gray-900">{{ space.total_handles }}</dd>
+                </div>
+                <div>
+                    <dt class="text-gray-500">Committed</dt>
+                    <dd class="font-medium text-green-600">{{ space.committed_handles }}</dd>
+                </div>
+                <div>
+                    <dt class="text-gray-500">Staged</dt>
+                    <dd class="font-medium {% if space.staged_handles > 0 %}text-orange-500{% else %}text-gray-400{% endif %}">{{ space.staged_handles }}</dd>
+                </div>
+            </dl>
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}
+
+{% block scripts %}{% endblock %}

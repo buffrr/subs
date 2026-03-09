@@ -1,1120 +1,34 @@
+//! Operator - the main entry point for subs operations.
+//!
+//! Combines local space management with on-chain RPC operations.
+
+use std::collections::{HashMap};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use anyhow::anyhow;
+use bitcoin::hashes::{sha256, Hash as BitcoinHash};
+use bitcoin::{FeeRate, ScriptBuf, Txid};
+use fabric::client::Fabric;
+use libveritas::cert::{Certificate, ChainProofRequestUtils, PtrsSubtree, SpacesSubtree};
 use libveritas::sname::{NameLike, SName};
-use std::{fs, io};
-use std::io::Read;
-use std::path::{Path, PathBuf};
-
-use anyhow::{anyhow, Context};
-use atty::Stream;
-use base64::Engine;
-use clap::{Parser, Subcommand};
-
-use libveritas_methods::{STEP_ELF, STEP_ID, FOLD_ELF, FOLD_ID};
-use risc0_zkvm::{default_prover, ExecutorEnv, Prover, ProverOpts, Receipt};
-
-use serde::{Deserialize, Serialize};
-
-use spacedb::db::Database;
-use spacedb::{Hash, NodeHasher, Sha256Hasher};
-use spacedb::tx::{ProofType};
-use bitcoin::{key, OutPoint, ScriptBuf, XOnlyPublicKey};
-use bitcoin::hashes::{Hash as HashUtil, sha256};
-use bitcoin::secp256k1::{rand, Secp256k1};
-use libveritas::cert::{Certificate, HandleSubtree, LeafKind, PtrsSubtree, SpacesSubtree, Witness};
-use spaces_protocol::slabel::SLabel;
-
-
-use libveritas_zk::BatchReader;
-use libveritas_zk::guest::Commitment;
-use regex::Regex;
+use libveritas::{ProvableOption, SovereigntyState, Zone};
+use libveritas::msg::{ChainProof, Message};
+use spaces_ptr::{ChainProofRequest, RootAnchor};
+use spacedb::{NodeHasher, Sha256Hasher};
 use spacedb::subtree::SubTree;
-use spaces_client::auth::http_client_with_auth;
 use spaces_client::jsonrpsee::http_client::HttpClient;
-use spaces_client::rpc::RpcClient;
+use spaces_client::rpc::{
+    CommitParams, RpcClient, RpcWalletRequest, RpcWalletTxBuilder,
+};
+use spaces_protocol::slabel::SLabel;
+use spaces_protocol::{Bytes, FullSpaceOut};
+use spaces_ptr::FullPtrOut;
 use spaces_ptr::sptr::Sptr;
-use crate::{Batch, BatchEntry, HandleRequest};
-
-const STAGING_FILE: &str = "uncommitted.json";
-
-#[derive(Parser)]
-#[command(
-    bin_name = "subs",
-    author,
-    version,
-    about,
-    before_help = r#"
-
-
-      ✦     @
-   ✦     ₿     ✦      subs — create, prove & verify Bitcoin handles off-chain
-      ✦     @"#)]
-pub struct Cli {
-    /// Working directory (default: current dir)
-    #[arg(short = 'C', global = true)]
-    pub c: Option<String>,
-
-    #[command(subcommand)]
-    pub cmd: Commands,
-}
-
-#[derive(Subcommand)]
-pub enum Commands {
-    /// Request a handle e.g. alice@example (for end-users)
-    #[command(name = "request")]
-    Request(RequestArgs),
-
-    /// Operators: Stage an inclusion request for the next batch
-    #[command(name = "add")]
-    Add(AddArgs),
-
-    /// Operators: Commit the next batch
-    #[command(name = "commit")]
-    Commit(CommitArgs),
-
-    /// Operators: zk-STARK prove the commitments (GPU recommended)
-    #[command(name = "prove")]
-    Prove(ProveArgs),
-
-    /// Operators: Compress the root certificate with STARK → SNARK conversion.
-    #[command(name = "compress")]
-    Compress(CompressArgs),
-
-    /// Operators: Status of current batch
-    #[command(name = "status")]
-    Status,
-
-    /// Certificate operations (issue, verify, …)
-    #[command(name = "cert", subcommand)]
-    Cert(CertCmd),
-}
-
-#[derive(Subcommand)]
-pub enum CertCmd {
-    /// Operators: issue a handle certificate
-    Issue(IssueArgs),
-
-    /// Verify a handle certificate against a root certificate
-    Verify(VerifyArgs),
-}
-
-#[derive(clap::Args)]
-#[command(author, version, about, long_about = None)]
-pub struct RequestArgs {
-    /// The handle name e.g. alice@example
-    handle: SName,
-    #[arg(short = 's', long)]
-    script_pubkey: Option<String>,
-}
-
-#[derive(clap::Args)]
-#[command(author, version, about, long_about = None)]
-pub struct AddArgs {
-    pub(crate) files: Vec<String>,
-}
-
-#[derive(clap::Args, Clone)]
-#[command(author, version, about, long_about = None)]
-pub struct CommitArgs {
-    #[arg(long, short)]
-    dry_run: bool,
-}
-
-#[derive(clap::Args, Clone)]
-#[command(author, version, about, long_about = None)]
-pub struct CompressArgs {
-    #[arg(long, short)]
-    dry_run: bool,
-}
-
-#[derive(clap::Args, Clone)]
-#[command(author, version, about, long_about = None)]
-pub struct ProveArgs {
-    #[arg(long, short)]
-    dry_run: bool,
-}
-
-#[derive(clap::Args)]
-#[command(author, version, about, long_about = None)]
-pub struct IssueArgs {
-    /// The handle name e.g. alice@example
-    pub handle: SName,
-    /// Spaces rpc url
-    #[arg(long)]
-    pub rpc_url: String,
-    /// Spaces rpc user
-    #[arg(long)]
-    pub rpc_user: Option<String>,
-    /// Spaces rpc password
-    #[arg(long)]
-    pub rpc_password: Option<String>,
-    /// Space cookie path
-    #[arg(long)]
-    pub rpc_cookie: Option<String>,
-}
-
-#[derive(clap::Args)]
-#[command(author, version, about, long_about = None)]
-pub struct VerifyArgs {
-    /// The handle certificate file
-    pub cert_file: PathBuf,
-
-    /// The root certificate file (--root <FILE>)
-    #[arg(long)]
-    root: Option<PathBuf>,
-
-    #[arg(required = true)]
-    pub rpc_url: String,
-    /// Spaces rpc user
-    #[arg(long)]
-    pub rpc_user: Option<String>,
-    /// Spaces rpc password
-    #[arg(long)]
-    pub rpc_password: Option<String>,
-    /// Space cookie path
-    #[arg(long)]
-    pub rpc_cookie: Option<String>,
-}
-
-#[derive(Default, Serialize, Deserialize, Clone)]
-struct Chain {
-    version: u32,
-    space: Option<SLabel>,
-    entries: Vec<ChainEntry>,
-    tip_receipt: Option<String>,
-    tip_receipt_groth16: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-struct ChainEntry {
-    pre_diff_root: Option<String>,
-    post_diff_root: String,
-    diff_file: String,
-    subtree_file: Option<String>,
-    step_receipt: Option<String>,
-    aggregate_receipt: Option<String>,
-    aggregate_groth16: Option<String>,
-}
-
-pub struct App {
-    wd: PathBuf,
-}
-
-impl App {
-    pub fn new(c: &Option<String>) -> anyhow::Result<Self> {
-        let mut wd = PathBuf::new();
-        if let Some(dir) = c {
-            wd.push(dir);
-            if !wd.exists() {
-                fs::create_dir_all(&wd)?;
-            }
-            let md = fs::metadata(&wd)?;
-            if !md.is_dir() {
-                return Err(anyhow!("Path is not a directory: {}", wd.display()));
-            }
-        } else {
-            wd.push(".");
-        }
-        Ok(Self { wd })
-    }
-
-    fn staging_path(&self) -> PathBuf {
-        self.wd.join(STAGING_FILE)
-    }
-
-    fn commitments_dir(&self) -> PathBuf {
-        self.wd.join("commitments")
-    }
-
-    fn chain_path(&self) -> PathBuf {
-        self.wd.join("chain.json")
-    }
-
-    fn sdb_path(&self, space: &SLabel) -> PathBuf {
-        self.wd.join(format!("{}.sdb", space))
-    }
-
-    fn step_path_for(&self, idx: usize, post_diff_root: &str) -> PathBuf {
-        let base = format!("{:06}_{}", idx, post_diff_root);
-        self.commitments_dir().join(format!("{}.step.zk.bin", base))
-    }
-
-    fn fold_path_for(&self, idx: usize, post_diff_root: &str) -> PathBuf {
-        let base = format!("{:06}_{}", idx, post_diff_root);
-        self.commitments_dir().join(format!("{}.fold.zk.bin", base))
-    }
-
-    fn load_chain(&self) -> anyhow::Result<Chain> {
-        let p = self.chain_path();
-        if p.exists() { Ok(serde_json::from_slice(&fs::read(p)?)?) } else { Ok(Chain::default()) }
-    }
-
-    fn save_chain(&self, chain: &Chain) -> anyhow::Result<()> {
-        fs::create_dir_all(self.commitments_dir())?;
-        fs::write(self.chain_path(), serde_json::to_vec_pretty(chain)?)?;
-        Ok(())
-    }
-
-    fn load_batch(&self) -> anyhow::Result<Option<Batch>> {
-        let p = self.staging_path();
-        if !p.exists() { return Ok(None); }
-        let raw = fs::read(p)?;
-        let batch = serde_json::from_slice(raw.as_slice())
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "could not parse uncommitted.json"))?;
-        Ok(Some(batch))
-    }
-
-    fn save_batch(&self, batch: &Batch) -> anyhow::Result<()> {
-        let s = serde_json::to_string_pretty(batch)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "unable to serialize batch"))?;
-        fs::write(self.staging_path(), s)?;
-        Ok(())
-    }
-
-    fn load_receipt_and_commitment(&self, path: &Path) -> anyhow::Result<(Receipt, Commitment)> {
-        let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-        let receipt: Receipt = borsh::from_slice(&bytes)
-            .map_err(|e| anyhow!("decode receipt {}: {}", path.display(), e))?;
-        let cm: Commitment = receipt.journal.decode()
-            .map_err(|e| anyhow!("decode journal {}: {}", path.display(), e))?;
-        Ok((receipt, cm))
-    }
-
-    pub fn cmd_status(&self) -> anyhow::Result<()> {
-        let batch = self.load_batch()?;
-        if let Some(batch) = batch {
-            println!("✔ Pending changes");
-            println!("   → Space        : {}", batch.space);
-            println!("   → New handles: {}", batch.entries.len());
-            println!("\nRun `subs commit` to commit changes.");
-        } else {
-            println!("\nNo changes to commit.");
-            println!("   → Use `subs add` to stage handle requests.");
-        }
-        Ok(())
-    }
-
-    pub fn cmd_add(&self, args: AddArgs) -> anyhow::Result<()> {
-        let requests = args.expand_files()?;
-
-        let mut batch: Option<Batch> = self.load_batch()?;
-        let chain = self.load_chain()?;
-        let db = if let Some(space) = &chain.space {
-            self.load_db(space)?
-        } else { None };
-        let mut reader = if let Some(db) = db {
-            Some(db.begin_read()?)
-        } else { None };
-        let mut get_handle = |handle: &SName| -> anyhow::Result<Option<Vec<u8>>> {
-            match reader.as_mut() {
-                None => Ok(None),
-                Some(r) => Ok(r.get(&Sha256Hasher::hash(handle.subspace().expect("subspace").as_slabel().as_ref()))?)
-            }
-        };
-
-        let batch_initial = batch.as_ref()
-            .map(|b| b.entries.len()).unwrap_or(0);
-        let mut add_req = |req: HandleRequest, batch: &mut Option<Batch>| -> anyhow::Result<()> {
-            let existing = chain.space.as_ref()
-                .or(batch.as_ref().map(|s| &s.space));
-            if let Some(existing) = existing {
-                // TODO: fix clone
-                if Some(existing.clone()) != req.handle.space() {
-                    return Err(anyhow!("Cannot add '{}' to existing space '{}'",
-                         req.handle, existing)
-                    );
-                }
-            }
-
-            let script_pubkey = hex::decode(&req.script_pubkey)
-                .map_err(|e| anyhow!("Invalid script_pubkey hex: {}", e))?;
-
-
-            let prev = get_handle(&req.handle)?
-                .or_else(|| batch.as_ref()
-                    .and_then(|b| b.entries.iter()
-                        .find(|e| req.handle.subspace().as_ref() == Some(&e.sub_label))
-                        .map(|e| e.script_pubkey.to_bytes())));
-
-            if let Some(value) = prev {
-                if value != script_pubkey {
-                    println!("   → {} - skipping already exists with a different spk", req.handle);
-                }
-
-                // Otherwise just ignore it its already there same value
-                return Ok(());
-            }
-
-            let mut b = batch.take().unwrap_or_else(|| Batch::new(req.handle.space().expect("space").clone()));
-            b.entries.push(BatchEntry { sub_label: req.handle.subspace().expect("subspace").clone(), script_pubkey: script_pubkey.into() });
-            *batch = Some(b);
-            println!("   → {}", req.handle);
-            Ok(())
-        };
-
-        for file in &requests {
-            let raw = fs::read(file)?;
-            let req: HandleRequest = serde_json::from_slice(&raw)
-                .map_err(|e| anyhow!("Could not parse {}: {}", file.display(), e))?;
-            add_req(req, &mut batch)?;
-        }
-
-        if args.files.is_empty() && !atty::is(Stream::Stdin) {
-            let mut raw = Vec::new();
-            io::stdin().read_to_end(&mut raw)
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Nothing to add"))?;
-            let req: HandleRequest = serde_json::from_slice(&raw)
-                .map_err(|e| anyhow!("Could not parse stdin: {}", e))?;
-            add_req(req, &mut batch)?;
-        }
-
-
-        if let Some(b) = &batch {
-            let chain = self.load_chain()?;
-            if let Some(space) = &chain.space {
-                if &b.space != space {
-                    return Err(
-                        anyhow!("Batch space {} doesn't match existing space {} in current working directory",
-                        b.space, space
-                    ));
-                }
-            }
-
-
-            self.save_batch(b)?;
-            println!("✔ Added {} request(s) to batch", b.entries.len() - batch_initial);
-        }
-
-
-        Ok(())
-    }
-
-    fn load_db(&self, space: &SLabel) -> anyhow::Result<Option<Database<Sha256Hasher>>> {
-        let db_path = self.sdb_path(&space);
-        if !db_path.exists() {
-            return Ok(None);
-        }
-        let db = Database::open(db_path.to_str().unwrap())?;
-        Ok(Some(db))
-    }
-
-    fn load_or_create_db(&self, space: &SLabel) -> anyhow::Result<Database<Sha256Hasher>> {
-        let db_path = self.sdb_path(&space);
-        Ok(Database::open(db_path.to_str().unwrap())?)
-    }
-
-    fn prepare_zk_input(&self) -> anyhow::Result<(Option<Vec<u8>>, Batch)> {
-        let batch = self.load_batch()?.ok_or_else(|| anyhow!("No uncommitted changes found"))?;
-        let new_batch = batch.to_zk_input();
-        let db = match self.load_db(&batch.space)? {
-            None => return Ok((None, batch)),
-            Some(db) => db,
-        };
-
-        let reader = BatchReader(new_batch.as_slice());
-        let keys = reader.iter().map(|t| t.handle.try_into()
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid subspace hash")))
-            .collect::<Result<Vec<Hash>, io::Error>>()?;
-        let mut snapshot = db.begin_read()?;
-        let subtree = snapshot.prove(&keys, ProofType::Standard)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("could not generate subtree: {}", e)))?;
-        let subtree = borsh::to_vec(&subtree)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("could not encode subtree: {}", e)))?;
-
-        Ok((Some(subtree), batch))
-    }
-
-    pub fn cmd_commit(&self, args: CommitArgs) -> anyhow::Result<()> {
-        if !self.staging_path().exists() { return Err(anyhow!("No changes to commit")); }
-
-        let (subtree_opt, batch) = self.prepare_zk_input()?;
-        let diff_bytes = batch.to_zk_input();
-
-        let chain = match subtree_opt {
-            Some(subtree_bytes) => {
-                let c = libveritas_zk::guest::run(subtree_bytes.clone(), diff_bytes.clone(), STEP_ID, FOLD_ID)
-                    .map_err(|e| anyhow!("could not validate program input: {}", e))?;
-
-                if args.dry_run {
-                    println!("\nPreview:");
-                    println!("   → pre_root : {}", hex::encode(&c.initial_root));
-                    println!("   → post_root: {}", hex::encode(&c.final_root));
-                    return Ok(());
-                }
-
-                fs::create_dir_all(self.commitments_dir())?;
-                let mut chain = self.load_chain()?;
-                if chain.space.is_none() { chain.space = Some(batch.space.clone()); }
-
-                let pre_hex = hex::encode(&c.initial_root);
-                let post_hex = hex::encode(&c.final_root);
-                let idx = chain.entries.len();
-                let base = format!("{:06}_{}", idx, post_hex);
-                let diff_rel = format!("{}.diff.bin", base);
-                let subtree_rel = format!("{}.subtree.bin", base);
-
-                fs::write(self.commitments_dir().join(&diff_rel), &diff_bytes)?;
-                fs::write(self.commitments_dir().join(&subtree_rel), subtree_bytes)?;
-
-                chain.entries.push(ChainEntry {
-                    pre_diff_root: Some(pre_hex),
-                    post_diff_root: post_hex,
-                    diff_file: diff_rel,
-                    subtree_file: Some(subtree_rel),
-                    step_receipt: None,
-                    aggregate_receipt: None,
-                    aggregate_groth16: None,
-                });
-                self.save_chain(&chain)?;
-
-                let db = self.load_db(&batch.space)?
-                    .ok_or(anyhow!("No database found"))?;
-                let mut tx = db.begin_write()?;
-                for e in batch.entries {
-                    tx = tx.insert(Sha256Hasher::hash(e.sub_label.as_slabel().as_ref()), e.script_pubkey.to_bytes())?;
-                }
-                tx.commit()?;
-                chain
-            }
-
-            None => {
-                if args.dry_run {
-                    println!("initial commit: no subtree, skipping zk; no writes performed");
-                    return Ok(());
-                }
-
-                let db = self.load_or_create_db(&batch.space)?;
-
-                let mut tx = db.begin_write()?;
-                for e in &batch.entries {
-                    tx = tx.insert(Sha256Hasher::hash(e.sub_label.as_slabel().as_ref()), e.script_pubkey.to_bytes())?;
-                }
-                tx.commit()?;
-
-                let end_root = hex::encode(
-                    db.begin_read().expect("read").compute_root().expect("root")
-                );
-
-                fs::create_dir_all(self.commitments_dir())?;
-                let mut chain = self.load_chain()?;
-                if chain.space.is_none() { chain.space = Some(batch.space.clone()); }
-
-                let idx = chain.entries.len();
-                let base = format!("{:06}_{}", idx, end_root);
-                let diff_rel = format!("{}.diff.bin", base);
-
-                fs::write(self.commitments_dir().join(&diff_rel), &diff_bytes)?;
-
-                chain.entries.push(ChainEntry {
-                    pre_diff_root: None,
-                    post_diff_root: end_root,
-                    diff_file: diff_rel,
-                    subtree_file: None,
-                    step_receipt: None,
-                    aggregate_receipt: None,
-                    aggregate_groth16: None,
-                });
-                self.save_chain(&chain)?;
-                chain
-            }
-        };
-
-        println!("✔ Committed batch");
-        println!("   → Tree root: {}", chain.entries.last().expect("last root").post_diff_root);
-
-        fs::remove_file(self.staging_path())?;
-        Ok(())
-    }
-
-    pub fn cmd_prove(&self, _args: ProveArgs) -> anyhow::Result<()> {
-        let chain_path = self.chain_path();
-        if !chain_path.exists() { return Err(anyhow!("missing {}", chain_path.display())); }
-        let mut chain = self.load_chain().with_context(|| format!("loading {}", chain_path.display()))?;
-        if chain.space.is_none() { return Err(anyhow!("No space to prove")); }
-
-        println!("== Proving steps for space: {} ==", chain.space.as_ref().expect("space"));
-        let store_dir = self.commitments_dir();
-
-        for (i, entry) in chain.entries.iter_mut().skip(1).enumerate() {
-            let step_path = self.step_path_for(i, &entry.post_diff_root);
-
-            if step_path.exists() {
-                if entry.step_receipt.is_none() {
-                    entry.step_receipt = Some(step_path.file_name().unwrap().to_string_lossy().into());
-                }
-                println!("[#{}] step exists, skipping: {}", i, step_path.display());
-                continue;
-            }
-
-            let diff_path = store_dir.join(&entry.diff_file);
-            let subtree_rel = entry.subtree_file.as_ref()
-                .ok_or_else(|| anyhow!("[#{}] missing subtree_file in chain.json", i))?;
-            let subtree_path = store_dir.join(subtree_rel);
-
-            let diff_bytes = fs::read(&diff_path)
-                .with_context(|| format!("[#{}] reading diff {}", i, diff_path.display()))?;
-            let subtree = fs::read(&subtree_path)
-                .with_context(|| format!("[#{}] reading subtree {}", i, subtree_path.display()))?;
-
-            let env = ExecutorEnv::builder()
-                .write(&(subtree, diff_bytes, STEP_ID, FOLD_ID))
-                .map_err(|e| anyhow!("[#{}] env write: {}", i, e))?
-                .build()
-                .map_err(|e| anyhow!("[#{}] env build: {}", i, e))?;
-
-            let opts = ProverOpts::succinct();
-            let prover = default_prover();
-            println!("[#{}] Proving step {} → {}", i, entry.pre_diff_root.as_deref().unwrap_or("-"), entry.post_diff_root);
-            let start = std::time::Instant::now();
-
-            let prove_info = prover.prove_with_opts(env, STEP_ELF, &opts)
-                .map_err(|e| anyhow!("[#{}] prove step failed: {}", i, e))?;
-            let receipt = prove_info.receipt;
-
-            receipt.verify(STEP_ID)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("[#{}] verify step failed: {}", i, e)))?;
-            println!("[#{}] Step verified in {:?}", i, start.elapsed());
-
-            let raw = borsh::to_vec(&receipt)
-                .map_err(|e| anyhow!("[#{}] serialize step receipt: {}", i, e))?;
-            fs::write(&step_path, raw)
-                .with_context(|| format!("[#{}] writing {}", i, step_path.display()))?;
-
-            entry.step_receipt = Some(step_path.file_name().unwrap().to_string_lossy().into());
-        }
-
-        self.save_chain(&chain)?;
-        println!("Step pass complete.");
-        self.fold_aggregate()?;
-        Ok(())
-    }
-
-    fn fold_aggregate(&self) -> anyhow::Result<()> {
-        let chain_path = self.chain_path();
-        if !chain_path.exists() { return Err(anyhow!("missing {}", chain_path.display())); }
-        let mut chain = self.load_chain().with_context(|| format!("loading {}", chain_path.display()))?;
-        if chain.space.is_none() { return Err(anyhow!("No space to prove")); };
-        println!("== Folding aggregate for space: {} ==", chain.space.as_ref().expect("space"));
-
-        let mut acc_receipt: Option<Receipt> = None;
-        let mut acc_commit: Option<Commitment> = None;
-        let mut last_step_rel: Option<String> = None;
-
-        for (i, entry) in chain.entries.iter_mut().skip(1).enumerate() {
-            let step_path = self.step_path_for(i, &entry.post_diff_root);
-            if !step_path.exists() { return Err(anyhow!("[#{}] missing step receipt {}", i, step_path.display())); }
-            let (step_receipt, step_commit) = self.load_receipt_and_commitment(&step_path)?;
-            last_step_rel = Some(step_path.file_name().unwrap().to_string_lossy().into());
-            if acc_receipt.is_none() {
-                acc_receipt = Some(step_receipt.clone());
-                acc_commit = Some(step_commit.clone());
-                continue;
-            }
-
-            let agg_path = self.fold_path_for(i, &entry.post_diff_root);
-
-            if agg_path.exists() {
-                let bytes = fs::read(&agg_path)?;
-                let r: Receipt = borsh::from_slice(&bytes)?;
-                r.verify(FOLD_ID)?;
-                let cm: Commitment = r.journal.decode()?;
-
-                acc_receipt = Some(r.clone());
-                acc_commit = Some(cm.clone());
-                entry.aggregate_receipt = Some(agg_path.file_name().unwrap().to_string_lossy().into());
-                chain.tip_receipt = entry.aggregate_receipt.clone();
-
-                println!("[#{}] existing aggregate, advanced accumulator", i);
-                continue;
-            }
-
-            let env = ExecutorEnv::builder()
-                .add_assumption(acc_receipt.as_ref().unwrap().clone())
-                .add_assumption(step_receipt.clone())
-                .write(&(acc_commit.as_ref().unwrap().clone(), Some(step_commit.clone())))
-                .map_err(|e| anyhow!("[#{}] env write: {}", i, e))?
-                .build()
-                .map_err(|e| anyhow!("[#{}] env build: {}", i, e))?;
-
-            let prover = default_prover();
-            let opts = ProverOpts::succinct();
-
-            println!("[#{}] Folding {} → {}", i, entry.pre_diff_root.as_deref().unwrap_or("-"), entry.post_diff_root);
-            let start = std::time::Instant::now();
-
-            let prove_info = prover.prove_with_opts(env, FOLD_ELF, &opts)
-                .map_err(|e| anyhow!("[#{}] fold prove failed: {}", i, e))?;
-            let folded = prove_info.receipt;
-
-            folded.verify(FOLD_ID)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("[#{}] fold verify failed: {}", i, e)))?;
-            println!("[#{}] Fold verified in {:?}", i, start.elapsed());
-
-            let raw = borsh::to_vec(&folded)
-                .map_err(|e| anyhow!("[#{}] serialize fold receipt: {}", i, e))?;
-            fs::write(&agg_path, raw)
-                .with_context(|| format!("[#{}] writing {}", i, agg_path.display()))?;
-
-            entry.step_receipt = Some(step_path.file_name().unwrap().to_string_lossy().into());
-            entry.aggregate_receipt = Some(agg_path.file_name().unwrap().to_string_lossy().into());
-            chain.tip_receipt = entry.aggregate_receipt.clone();
-
-            let new_cm: Commitment = folded.journal.decode()
-                .map_err(|e| anyhow!("[#{}] decode folded journal: {}", i, e))?;
-            acc_receipt = Some(folded);
-            acc_commit = Some(new_cm);
-        }
-
-        if chain.tip_receipt.is_none() {
-            if let Some(rel) = last_step_rel {
-                chain.tip_receipt = Some(rel);
-            }
-        }
-
-        self.save_chain(&chain)?;
-        println!("✔ Fold pass complete");
-
-        Ok(())
-    }
-
-    pub fn cmd_compress_snark(&self, _args: CompressArgs) -> anyhow::Result<()> {
-        let wd = self.commitments_dir();
-        let mut chain = self.load_chain()?;
-        let tip_rel = chain.tip_receipt.clone()
-            .ok_or_else(|| anyhow!("No proofs to compress - did you call prove/fold?"))?;
-        let tip_path = wd.join(&tip_rel);
-        let (receipt, commitment) = self.load_receipt_and_commitment(&tip_path)?;
-
-        let env = ExecutorEnv::builder()
-            .add_assumption(receipt)
-            .write(&(commitment, None::<Commitment>))
-            .map_err(|e| anyhow!("env write: {}", e))?
-            .build()
-            .map_err(|e| anyhow!("env build: {}", e))?;
-
-        let prover = default_prover();
-        let opts = ProverOpts::groth16();
-        let info = prover.prove_with_opts(env, FOLD_ELF, &opts)?;
-        let snark_path = tip_path.with_extension("snark.bin");
-
-        let raw = borsh::to_vec(&info.receipt)
-            .map_err(|e| anyhow!("serialize snark receipt: {}", e))?;
-        fs::write(&snark_path, raw)
-            .with_context(|| format!("writing {}", snark_path.display()))?;
-
-        chain.tip_receipt_groth16 = Some(snark_path.file_name().unwrap().to_string_lossy().into());
-        if let Some(entry) = chain.entries.last_mut() {
-            entry.aggregate_groth16 = chain.tip_receipt_groth16.clone();
-        }
-        self.save_chain(&chain)?;
-        println!("✔ Compressed proof");
-        println!("   → {}", snark_path.display());
-
-        Ok(())
-    }
-
-    pub fn cmd_create(&self, args: RequestArgs) -> Result<(), io::Error> {
-        let priv_file = format!("{}.priv", args.handle);
-        let priv_path = self.wd.join(&priv_file);
-
-        let script_pubkey = if let Some(ref spk) = args.script_pubkey {
-            spk.clone()
-        } else {
-            let secp = Secp256k1::new();
-            let keypair = key::Keypair::new(&secp, &mut rand::thread_rng());
-
-            let secret_key = keypair.secret_key();
-            let secret_hex = hex::encode(secret_key.secret_bytes());
-            fs::write(&priv_path, secret_hex).map_err(|e| {
-                io::Error::new(io::ErrorKind::Other, format!("Failed to write private key: {}", e))
-            })?;
-            let (xonly_pubkey, _) = XOnlyPublicKey::from_keypair(&keypair);
-            let p2tr_script = ScriptBuf::new_p2tr(&secp, xonly_pubkey, None);
-            hex::encode(p2tr_script.as_bytes())
-        };
-
-        let subspace_data = HandleRequest {
-            handle: args.handle.clone(),
-            script_pubkey,
-        };
-
-        let pub_file = format!("{}.req.json", args.handle);
-        let json_path = self.wd.join(&pub_file);
-        let json_str = serde_json::to_string_pretty(&subspace_data).map_err(|e| {
-            io::Error::new(io::ErrorKind::Other, format!("Failed to serialize JSON: {}", e))
-        })?;
-
-        fs::write(&json_path, json_str).map_err(|e| {
-            io::Error::new(io::ErrorKind::Other, format!("Failed to write JSON file: {}", e))
-        })?;
-
-        println!("✔ Created handle request");
-        println!("   → {}", pub_file);
-        if args.script_pubkey.is_none() {
-            println!("   → Private key saved: {}", priv_file);
-        }
-        println!("\nSubmit the request file to {} operator to get a certificate.", args.handle.space().expect("space"));
-        Ok(())
-    }
-
-    pub async fn cmd_cert_issue(&self, args: IssueArgs) -> anyhow::Result<()> {
-        let client =
-            client_from_args(&args.rpc_url, args.rpc_user, args.rpc_password, args.rpc_cookie)?;
-        if args.handle.label_count() == 0 || args.handle.label_count() > 2 {
-            return Err(anyhow!("specify a valid handle"));
-        }
-
-        let space = args.handle.space().expect("space");
-        let space_str = space.to_string();
-
-        let space_info = client.get_space(&space_str).await?
-            .ok_or_else(|| anyhow!("space does not exist"))?;
-
-        let space_proof = client.prove_ptrout(
-            space_info.outpoint(), None
-        ).await?;
-
-        let space_inclusion : SubTree<Sha256Hasher> = borsh::from_slice(&space_proof.proof)
-            .map_err(|e| anyhow!("could not decode space proof: {}", e))?;
-
-        // Load the space receipt
-        let chain = self.load_chain()?;
-        let receipt_rel = chain.tip_receipt_groth16
-            .or(chain.tip_receipt)
-            .ok_or_else(|| anyhow!("No receipt found - run prove first"))?;
-        let receipt_path = self.commitments_dir().join(&receipt_rel);
-        let (receipt, commitment_info) = self.load_receipt_and_commitment(&receipt_path)?;
-
-        let commitment_proof = client
-            .prove_commitment(
-                space,
-                sha256::Hash::from_slice(&commitment_info.final_root).expect("valid"),
-                None
-            ).await.map_err(|e| anyhow!("could not prove commitment: {}", e))?;
-
-        let commitment_inclusion : SubTree<Sha256Hasher> = borsh::from_slice(&commitment_proof.proof)
-            .map_err(|e| anyhow!("could not decode commitment proof: {}", e))?;
-
-        let root = Certificate {
-            subject: args.handle.clone(),
-            witness: Witness::Root {
-                inclusion: SpacesSubtree(space_inclusion),
-                // TODO: include delegate information for the space in this tree
-                ptrs: Some(PtrsSubtree(commitment_inclusion)),
-                commitment: Some(receipt),
-            },
-        };
-
-        if args.handle.is_single_label() {
-            let out_name = format!("{}.cert.bin", &args.handle);
-            let out_path = self.wd.join(&out_name);
-            let cert_bytes = borsh::to_vec(&root)
-                .map_err(|e| anyhow!("could not serialize root cert: {}", e))?;
-            fs::write(&out_path, cert_bytes)?;
-
-            println!("✔ Issued root certificate");
-            println!("   → {}", out_name);
-            return Ok(());
-        }
-
-        // It's a handle so we have to create a handle cert
-        let db = self.load_db(&args.handle.space().expect("space"))?
-            .ok_or(anyhow!("No database found"))?;
-        let mut snap = db.begin_read()?;
-
-        let key = Sha256Hasher::hash(args.handle.subspace().expect("subspace").as_slabel().as_ref());
-        let spk = snap.get(&key)?.ok_or_else(|| {
-            anyhow!("handle '{}' not found", args.handle)
-        })?;
-
-        let subtree = snap.prove(&[key], ProofType::Standard)
-            .map_err(|e| anyhow!("could not generate subtree: {}", e))?;
-
-        let sptr = Sptr::from_spk::<Sha256>(ScriptBuf::from_bytes(spk.clone()));
-        let ptr_info = client.get_ptr(sptr)
-            .await.map_err(|e| anyhow!("could not get ptr: {}", e))?;
-
-        let key_rotation_proof = match ptr_info {
-            None => {
-                client.prove_ptr_outpoint(sptr).await
-                    .map_err(|e| anyhow!("could not prove ptr exclusion: {}", e))?
-            }
-            Some(info) => {
-                client.prove_ptrout(OutPoint {
-                    txid: info.txid,
-                    vout: info.ptrout.n as _,
-                }, None).await
-                    .map_err(|e| anyhow!("could not prove ptr inclusion: {}", e))?
-
-            }
-        };
-
-        let key_rotation : SubTree<Sha256Hasher> = borsh::from_slice(&key_rotation_proof.proof)
-            .map_err(|e| anyhow!("could not decode key rotation proof: {}", e))?;
-
-        let leaf = Certificate {
-            subject: args.handle,
-            witness: Witness::Leaf {
-                genesis_spk: ScriptBuf::from_bytes(spk),
-                kind: LeafKind::Final {
-                    inclusion: HandleSubtree(subtree),
-                    key_rotation: PtrsSubtree(key_rotation),
-                }
-            },
-        };
-
-        // Save root cert
-        let root_name = format!("{}.root.cert.bin", &leaf.subject);
-        let root_path = self.wd.join(&root_name);
-        let root_bytes = borsh::to_vec(&root)
-            .map_err(|e| anyhow!("could not serialize root cert: {}", e))?;
-        fs::write(&root_path, root_bytes)?;
-
-        // Save leaf cert
-        let leaf_name = format!("{}.cert.bin", &leaf.subject);
-        let leaf_path = self.wd.join(&leaf_name);
-        let leaf_bytes = borsh::to_vec(&leaf)
-            .map_err(|e| anyhow!("could not serialize leaf cert: {}", e))?;
-        fs::write(&leaf_path, leaf_bytes)?;
-
-        println!("✔ Issued certificates");
-        println!("   → {}", root_name);
-        println!("   → {}", leaf_name);
-        Ok(())
-    }
-
-    pub async fn cmd_cert_verify(&self, args: VerifyArgs) -> anyhow::Result<()> {
-        let _client =
-            client_from_args(&args.rpc_url, args.rpc_user, args.rpc_password, args.rpc_cookie)?;
-
-        // Load the leaf/handle certificate
-        let cert_bytes = fs::read(&args.cert_file)
-            .with_context(|| format!("reading {}", args.cert_file.display()))?;
-        let cert: Certificate = borsh::from_slice(&cert_bytes)
-            .map_err(|e| anyhow!("parse {}: {}", args.cert_file.display(), e))?;
-
-        // Load root certificate if provided
-        let root_cert: Option<Certificate> = match &args.root {
-            Some(root_path) => {
-                let root_bytes = fs::read(root_path)
-                    .with_context(|| format!("reading {}", root_path.display()))?;
-                Some(borsh::from_slice(&root_bytes)
-                    .map_err(|e| anyhow!("parse {}: {}", root_path.display(), e))?)
-            }
-            None => None,
-        };
-
-        let anchors = _client.get_root_anchors().await
-            .map_err(|e| anyhow!("could not load anchors: {}", e))?;
-
-        let veritas_anchors = serde_json::to_string(&anchors).expect("anchors");
-        let veritas_anchors : Vec<libveritas::RootAnchor> = serde_json::from_str(&veritas_anchors)
-            .expect("decode anchors");
-
-        let veritas = libveritas::Veritas
-        ::from_anchors(veritas_anchors).expect("valid anchors");
-
-        if let Some(root) = root_cert {
-            let root_zone = veritas.verify(root, None)?;
-            let leaf_zone = veritas.verify(cert, Some(&root_zone))?;
-
-            println!("✔ Certificate verified");
-            println!();
-            print_zone(&root_zone, "Root");
-            println!();
-            print_zone(&leaf_zone, "Handle");
-        } else {
-            let zone = veritas.verify(cert, None)?;
-
-            println!("✔ Certificate verified");
-            println!();
-            print_zone(&zone, "Root");
-        }
-
-        Ok(())
-    }
-
-    // pub fn cmd_cert_verify_old(&self, args: VerifyArgs) -> anyhow::Result<()> {
-    //     let sub_cert_bytes = fs::read(&args.cert_file)
-    //         .with_context(|| format!("reading {}", args.cert_file.display()))?;
-    //     let sub_cert: JsonCert = serde_json::from_slice(&sub_cert_bytes)
-    //         .map_err(|e| anyhow!("parse {}: {}", args.cert_file.display(), e))?;
-    //
-    //     let sub_root = match &sub_cert.witness {
-    //         JsonWitness::SubTree(st) => {
-    //             st.compute_root().map_err(|e| anyhow!("subtree compute_root: {}", e))?
-    //         }
-    //         JsonWitness::Receipt(_) => {
-    //             return Err(anyhow!("{} is a root certificate",
-    //                            args.cert_file.display()));
-    //         }
-    //     };
-    //
-    //     if args.root.is_none() {
-    //         println!("✔ Ready to verify inclusion");
-    //         println!("   → handle:   {}", sub_cert.request.handle);
-    //         println!("   → genesis:  {}", hex::encode(sub_root));
-    //         println!("   → root:     {}", hex::encode(sub_root));
-    //         println!("   → history:  {}", hex::encode(sub_root));
-    //
-    //         println!();
-    //         println!("   To verify inclusion, run:");
-    //         println!(
-    //             "       $ space-cli getcommitment {} {}",
-    //             sub_cert.request.handle.space().expect("space"),
-    //             hex::encode(sub_root)
-    //         );
-    //         println!("   ⚠️ Make sure the root, and history hashes match!");
-    //         return Ok(());
-    //     }
-    //     let root_path = args.root.expect("root");
-    //
-    //     let root_cert_bytes = fs::read(&root_path)
-    //         .with_context(|| format!("reading {}", root_path.display()))?;
-    //     let root_cert: JsonCert = serde_json::from_slice(&root_cert_bytes)
-    //         .map_err(|e| anyhow!("parse {}: {}", root_path.display(), e))?;
-    //
-    //     if sub_cert.request.handle.space() != root_cert.request.handle.space() {
-    //         return Err(anyhow!("invalid root {}, handle's parent is {}",
-    //             root_cert.request.handle.space().expect("space"),
-    //             sub_cert.request.handle.space().expect("space")
-    //         ))
-    //     }
-    //
-    //     if root_cert.request.handle.subspace().expect("subspace") != Label::from_str("self")
-    //         .expect("valid") {
-    //         return Err(anyhow!("invalid root certificate with non-self subject"))
-    //     }
-    //
-    //     // Verify the receipt, try FOLD first then STEP (root could be aggregate or single step)
-    //     let commitment: Commitment = match &root_cert.witness {
-    //         JsonWitness::Receipt(receipt) => {
-    //             // Try FOLD_ID then STEP_ID
-    //             if let Err(e1) = receipt.verify(FOLD_ID) {
-    //                 if let Err(e2) = receipt.verify(STEP_ID) {
-    //                     return Err(anyhow!("root receipt verify failed: fold={} step={}", e1, e2));
-    //                 }
-    //             }
-    //             receipt.journal.decode()
-    //                 .map_err(|e| anyhow!("decode commitment from receipt journal: {}", e))?
-    //         }
-    //         JsonWitness::SubTree(_) => {
-    //             return Err(anyhow!("{} is not a root certificate (expected receipt witness)",
-    //                            root_path.display()));
-    //         }
-    //     };
-    //
-    //     let root_hash = Sha256Hasher::hash(root_cert.request.handle.space().expect("space").as_ref());
-    //     if root_hash != commitment.space {
-    //         return Err(anyhow!("bad receipt expected space hash {}, got {}",
-    //                            hex::encode(root_hash), hex::encode(commitment.space)));
-    //     }
-    //
-    //     // Compare roots: subtree.compute_root() must match commitment.final_root
-    //     let final_root = commitment.final_root.clone();
-    //     let genesis_root = commitment.initial_root.clone();
-    //     let history_hash = commitment.transcript.clone();
-    //     if sub_root != final_root {
-    //         return Err(anyhow!(
-    //         "root mismatch: subtree={} receipt_final={}",
-    //         hex::encode(sub_root),
-    //         hex::encode(final_root)
-    //     ));
-    //     }
-    //
-    //     if root_cert.anchor != sub_cert.anchor {
-    //         return Err(anyhow!(
-    //             "anchor mismatch: subspace anchor {} != root anchor {}",
-    //             sub_cert.anchor, root_cert.anchor
-    //         ));
-    //     }
-    //
-    //
-    //     println!("✔ Ready to verify for inclusion");
-    //     println!("   → handle : {}", sub_cert.request.handle);
-    //     println!("   → genesis: {}", hex::encode(genesis_root));
-    //     println!("   → root : {}", hex::encode(final_root));
-    //     println!("   → history : {}", hex::encode(history_hash));
-    //
-    //     println!();
-    //     println!("   To verify inclusion, run:");
-    //     println!(
-    //         "       $ space-cli getcommitment {} {}",
-    //         sub_cert.request.handle.space().expect("space"),
-    //         hex::encode(final_root)
-    //     );
-    //     println!("   ⚠️ Make sure the root, and history hashes match!");
-    //     Ok(())
-    // }
-}
-
-impl AddArgs {
-    // If user passes a directory find files matching <subspace>@<space>.req.json format.
-    pub fn expand_files(&self) -> anyhow::Result<Vec<PathBuf>> {
-        let pat = Regex::new(r"^[^/@]+@[^/@]+\.req.json$").unwrap();
-
-        fn collect_dir(dir: &Path, pat: &Regex, out: &mut Vec<PathBuf>) -> anyhow::Result<()> {
-            for entry in fs::read_dir(dir)? {
-                let entry = entry?;
-                let p = entry.path();
-                if p.is_dir() {
-                    collect_dir(&p, pat, out)?;
-                } else if p.file_name()
-                    .and_then(|s| s.to_str())
-                    .map(|name| pat.is_match(name))
-                    .unwrap_or(false)
-                {
-                    out.push(p);
-                }
-            }
-            Ok(())
-        }
-
-        let mut out = Vec::new();
-
-        for arg in &self.files {
-            let p = PathBuf::from(arg);
-            if p.is_dir() {
-                collect_dir(&p, &pat, &mut out)?;
-            } else {
-                out.push(p);
-            }
-        }
-
-        out.sort();
-        out.dedup();
-        Ok(out)
-    }
-}
-
-pub fn client_from_args(rpc_url: &str, rpc_user: Option<String>, rpc_password: Option<String>, rpc_cookie: Option<String>)
-    -> anyhow::Result<HttpClient> {
-    let auth_token = if rpc_user.is_some() {
-        auth_token_from_creds(
-            rpc_user.as_ref().unwrap(),
-            rpc_password.as_ref().unwrap(),
-        )
-    } else {
-        let cookie_path = match &rpc_cookie {
-            Some(path) => path,
-            None => return Err(anyhow!("Either specify user/password or a cookie path for rpc auth")),
-        };
-        let cookie = fs::read_to_string(cookie_path).map_err(|_| {
-            anyhow!("Could not read cookie file")
-        })?;
-        auth_token_from_cookie(&cookie)
-    };
-    Ok(http_client_with_auth(rpc_url, &auth_token)?)
-}
-
-pub fn auth_cookie(user: &str, password: &str) -> String {
-    format!("{user}:{password}")
-}
-
-pub fn auth_token_from_cookie(cookie: &str) -> String {
-    base64::prelude::BASE64_STANDARD.encode(cookie)
-}
-pub fn auth_token_from_creds(user: &str, password: &str) -> String {
-    base64::prelude::BASE64_STANDARD.encode(auth_cookie(user, password))
-}
+use crate::core::{
+    CompressInput, LocalSpace, ProvingRequest, SkippedEntry, SpaceStatus, VerifyCertResult,
+};
+use crate::HandleRequest;
 
 pub struct Sha256;
 
@@ -1124,42 +38,1247 @@ impl spaces_protocol::hasher::KeyHasher for Sha256 {
     }
 }
 
-fn print_zone(zone: &libveritas::Zone, label: &str) {
-    println!("{} Zone:", label);
-    println!("   handle:     {}", zone.handle);
-    println!("   serial:     {}", zone.serial);
-    println!("   sovereign:  {}", zone.sovereign);
-    println!("   spk:        {}", hex::encode(zone.script_pubkey.as_bytes()));
+/// Status of an on-chain commit
+#[derive(Debug, Clone)]
+pub enum CommitStatus {
+    /// No pending commit
+    None,
+    /// Commit broadcast, waiting for confirmation
+    Pending { txid: Txid, expected_root: [u8; 32] },
+    /// Commit mined but not yet finalized
+    Confirmed {
+        txid: Txid,
+        block_height: u32,
+        confirmations: u32,
+    },
+    /// Commit finalized (144+ confirmations)
+    Finalized { block_height: u32 },
+}
 
-    if let Some(data) = &zone.data {
-        println!("   data:       {}", hex::encode(data.as_slice()));
+/// Handle information for API responses
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HandleInfo {
+    pub name: String,
+    pub script_pubkey: String,
+    pub status: String,
+    pub commitment_root: Option<String>,
+    pub publish_status: Option<String>,
+}
+
+/// Paginated list of handles
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HandlesListResult {
+    pub handles: Vec<HandleInfo>,
+    pub total: usize,
+    pub page: usize,
+    pub per_page: usize,
+    pub total_pages: usize,
+}
+
+/// Pipeline step state
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum StepState {
+    Complete,
+    InProgress,
+    Pending,
+    Skipped,
+}
+
+/// Commitment pipeline status for the UI stepper
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PipelineStatus {
+    /// Whether there's a pending commitment being processed
+    pub has_pending: bool,
+    /// Number of staged handles ready to commit
+    pub staged_count: usize,
+    /// Commitment index (0 = initial)
+    pub commitment_idx: Option<usize>,
+    /// Root hash of the commitment
+    pub root: Option<String>,
+    /// Transaction ID (if broadcast)
+    pub txid: Option<String>,
+    /// Steps and their states
+    pub steps: PipelineSteps,
+    /// Current active step name
+    pub current_step: Option<String>,
+    /// Additional status message
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PipelineSteps {
+    pub local: StepState,
+    pub proving: StepState,
+    pub broadcast: StepState,
+    pub confirmed: StepState,
+    pub finalized: StepState,
+    pub published: StepState,
+}
+
+/// The main entry point for subs operations.
+///
+/// Combines local space management with on-chain RPC operations.
+pub struct Operator {
+    data_dir: PathBuf,
+    wallet: String,
+    rpc: Option<HttpClient>,
+    fabric: Option<Fabric>,
+    spaces: Arc<Mutex<HashMap<SLabel, Arc<LocalSpace>>>>,
+}
+
+impl Operator {
+    /// Create a new Operator with RPC client.
+    ///
+    /// # Arguments
+    /// * `data_dir` - Directory for storing space data
+    /// * `wallet` - Wallet name for signing operations
+    /// * `rpc` - RPC client for chain interaction
+    pub fn new(data_dir: PathBuf, wallet: impl Into<String>, rpc: HttpClient) -> Self {
+        Self {
+            data_dir,
+            wallet: wallet.into(),
+            rpc: Some(rpc),
+            spaces: Arc::new(Mutex::new(HashMap::new())),
+            fabric: None,
+        }
     }
 
-    match &zone.delegate {
-        libveritas::ProvableOption::Exists { value } => {
-            println!("   delegate:");
-            println!("      spk:     {}", hex::encode(value.script_pubkey.as_bytes()));
-            if let Some(data) = &value.data {
-                println!("      data:    {}", hex::encode(data.as_slice()));
+    /// Create a new Operator for offline operations only.
+    ///
+    /// On-chain operations will fail without an RPC client.
+    pub fn offline(data_dir: PathBuf) -> Self {
+        Self {
+            data_dir,
+            wallet: String::new(),
+            rpc: None,
+            fabric: None,
+            spaces: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Set the fabric client with default seeds.
+    pub fn with_fabric(mut self) -> Self {
+        self.fabric = Some(Fabric::new());
+        self
+    }
+
+    /// Set the fabric client with custom bootstrap seed URLs.
+    pub fn with_fabric_seeds(mut self, seeds: &[&str]) -> Self {
+        self.fabric = Some(Fabric::with_seeds(seeds));
+        self
+    }
+
+    pub fn data_dir(&self) -> &PathBuf {
+        &self.data_dir
+    }
+
+    pub fn wallet(&self) -> &str {
+        &self.wallet
+    }
+
+    pub fn rpc(&self) -> Option<&HttpClient> {
+        self.rpc.as_ref()
+    }
+
+    fn require_rpc(&self) -> anyhow::Result<&HttpClient> {
+        self.rpc
+            .as_ref()
+            .ok_or_else(|| anyhow!("RPC client required for this operation"))
+    }
+
+    fn require_fabric(&self) -> anyhow::Result<&Fabric> {
+        self.fabric
+            .as_ref()
+            .ok_or_else(|| anyhow!("Fabric client required for this operation"))
+    }
+
+    /// Get a loaded space by name. Briefly locks the spaces map.
+    fn get_local_space(&self, space: &SLabel) -> anyhow::Result<Arc<LocalSpace>> {
+        self.spaces
+            .lock()
+            .unwrap()
+            .get(space)
+            .cloned()
+            .ok_or_else(|| anyhow!("space '{}' not loaded", space))
+    }
+
+    // =========================================================================
+    // Space Management
+    // =========================================================================
+
+    /// Check if the wallet can operate on a space (owns the delegated sptr).
+    async fn can_operate(&self, space: &SLabel) -> anyhow::Result<bool> {
+        use spaces_client::rpc::RpcClient;
+
+        let rpc = self.require_rpc()?;
+        let result = rpc
+            .wallet_can_operate(&self.wallet, space.clone())
+            .await
+            .map_err(|e| anyhow!("could not check if wallet can operate on '{}': {}", space, e))?;
+        Ok(result)
+    }
+
+    /// Load a space from disk without validation.
+    ///
+    /// This is used for loading existing spaces at startup.
+    /// Does not check if the wallet can operate on the space.
+    async fn load_space_unchecked(&self, space: &SLabel) -> anyhow::Result<()> {
+        {
+            let spaces_guard = self.spaces.lock().unwrap();
+            if spaces_guard.contains_key(space) {
+                return Ok(());
             }
         }
-        libveritas::ProvableOption::Empty => {
-            println!("   delegate:   (none)");
+
+        let space_dir = self.data_dir.join(space.to_string());
+        let local_space = LocalSpace::new(space.clone(), space_dir).await?;
+
+        let mut spaces_guard = self.spaces.lock().unwrap();
+        if !spaces_guard.contains_key(space) {
+            spaces_guard.insert(space.clone(), Arc::new(local_space));
         }
-        libveritas::ProvableOption::Unknown => {
-            println!("   delegate:   (unknown)");
-        }
+        Ok(())
     }
 
-    match &zone.state_root {
-        libveritas::ProvableOption::Exists { value } => {
-            println!("   state_root: {}", hex::encode(value));
+    /// Load or create a space.
+    ///
+    /// Opens an existing space or creates a new one if it doesn't exist.
+    /// For new spaces, verifies the wallet can operate on the space first.
+    pub async fn load_or_create_space(&self, space: &SLabel) -> anyhow::Result<()> {
+        // Check if already loaded
+        {
+            let spaces_guard = self.spaces.lock().unwrap();
+            if spaces_guard.contains_key(space) {
+                return Ok(());
+            }
         }
-        libveritas::ProvableOption::Empty => {
-            println!("   state_root: (none)");
+
+        // Check if space already exists on disk - if so, just load it
+        let space_dir = self.data_dir.join(space.to_string());
+        let exists_on_disk = space_dir.join("subs.db").exists();
+
+        // For NEW spaces (not on disk), verify we can operate on this space
+        if !exists_on_disk && self.rpc.is_some() {
+            let can_op = self.can_operate(space).await?;
+            if !can_op {
+                return Err(anyhow!(
+                    "space '{}' is not delegated to wallet '{}'",
+                    space,
+                    self.wallet
+                ));
+            }
         }
-        libveritas::ProvableOption::Unknown => {
-            println!("   state_root: (unknown)");
+
+        let local_space = LocalSpace::new(space.clone(), space_dir).await?;
+
+        let mut spaces_guard = self.spaces.lock().unwrap();
+        // Double-check in case another task created it
+        if !spaces_guard.contains_key(space) {
+            spaces_guard.insert(space.clone(), Arc::new(local_space));
         }
+        Ok(())
     }
+
+    /// List all loaded spaces.
+    pub fn list_spaces(&self) -> Vec<SLabel> {
+        self.spaces.lock().unwrap().keys().cloned().collect()
+    }
+
+    /// Get status of a loaded space.
+    pub async fn get_space_status(&self, space: &SLabel) -> anyhow::Result<SpaceStatus> {
+        let local_space = self.get_local_space(space)?;
+        local_space.status().await
+    }
+
+    /// List handles for a space with pagination.
+    pub async fn list_handles(
+        &self,
+        space: &SLabel,
+        page: usize,
+        per_page: usize,
+    ) -> anyhow::Result<HandlesListResult> {
+        let local_space = self.get_local_space(space)?;
+        let storage = local_space.storage();
+
+        let total = storage.handle_count().await?;
+        let offset = (page.saturating_sub(1)) * per_page;
+        let handles = storage.list_handles_paginated(offset, per_page).await?;
+
+        let total_pages = (total + per_page - 1) / per_page.max(1);
+
+        Ok(HandlesListResult {
+            handles: handles
+                .into_iter()
+                .map(|h| HandleInfo {
+                    name: h.name,
+                    script_pubkey: hex::encode(&h.script_pubkey),
+                    status: if h.commitment_root.is_some() {
+                        "committed".to_string()
+                    } else {
+                        "staged".to_string()
+                    },
+                    commitment_root: h.commitment_root,
+                    publish_status: h.publish_status,
+                })
+                .collect(),
+            total,
+            page,
+            per_page,
+            total_pages,
+        })
+    }
+
+    /// Get handles by commitment root.
+    pub async fn get_handles_by_commitment(
+        &self,
+        space: &SLabel,
+        root: &str,
+    ) -> anyhow::Result<Vec<HandleInfo>> {
+        let local_space = self.get_local_space(space)?;
+        let handles = local_space
+            .storage()
+            .list_handles_by_commitment(root)
+            .await?;
+
+        Ok(handles
+            .into_iter()
+            .map(|h| HandleInfo {
+                name: h.name,
+                script_pubkey: hex::encode(&h.script_pubkey),
+                status: "committed".to_string(),
+                commitment_root: h.commitment_root,
+                publish_status: h.publish_status,
+            })
+            .collect())
+    }
+
+    /// List all spaces with subs.db files on disk.
+    pub fn list_spaces_from_disk(&self) -> anyhow::Result<Vec<SLabel>> {
+        let mut spaces = Vec::new();
+        if !self.data_dir.exists() {
+            return Ok(spaces);
+        }
+        for entry in std::fs::read_dir(&self.data_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() && path.join("subs.db").exists() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if let Ok(space) = SLabel::try_from(name) {
+                        spaces.push(space);
+                    }
+                }
+            }
+        }
+        Ok(spaces)
+    }
+
+    /// Load all spaces from disk.
+    ///
+    /// Loads existing space data without validating wallet delegation.
+    /// Spaces that fail to load are logged and skipped.
+    pub async fn load_all_spaces(&self) -> anyhow::Result<()> {
+        let spaces = self.list_spaces_from_disk()?;
+        for space in spaces {
+            if let Err(e) = self.load_space_unchecked(&space).await {
+                log::warn!("Failed to load space '{}': {}", space, e);
+            }
+        }
+        Ok(())
+    }
+
+    /// Get status of all spaces.
+    pub async fn status(&self) -> anyhow::Result<crate::core::StatusResult> {
+        self.load_all_spaces().await?;
+
+        let local_spaces: Vec<Arc<LocalSpace>> = {
+            self.spaces.lock().unwrap().values().cloned().collect()
+        };
+
+        let mut statuses = Vec::new();
+        for local_space in local_spaces {
+            statuses.push(local_space.status().await?);
+        }
+        Ok(crate::core::StatusResult { spaces: statuses })
+    }
+
+    // =========================================================================
+    // Staging
+    // =========================================================================
+
+    /// Stage a handle request.
+    ///
+    /// The handle will be added to the staging area for the space.
+    /// Returns None if successful, or SkippedEntry if the handle was skipped.
+    pub async fn stage_request(
+        &self,
+        request: HandleRequest,
+    ) -> anyhow::Result<Option<SkippedEntry>> {
+        let space = request
+            .handle
+            .space()
+            .ok_or_else(|| anyhow!("handle must have a space"))?;
+
+        // Ensure space is loaded
+        self.load_or_create_space(&space).await?;
+
+        let local_space = self.get_local_space(&space)?;
+        local_space.add_request(&request).await
+    }
+
+    /// Add multiple handle requests to staging.
+    ///
+    /// Groups requests by space and stages them. Returns results per space.
+    pub async fn add_requests(
+        &self,
+        requests: Vec<HandleRequest>,
+    ) -> anyhow::Result<crate::core::AddResult> {
+        use crate::core::{AddResult, SpaceAddResult};
+
+        if requests.is_empty() {
+            return Err(anyhow!("No requests to add"));
+        }
+
+        // Group requests by space
+        let mut by_space: HashMap<SLabel, Vec<HandleRequest>> = HashMap::new();
+        for req in requests {
+            let space = req
+                .handle
+                .space()
+                .ok_or_else(|| anyhow!("handle must have a space"))?;
+            by_space.entry(space).or_default().push(req);
+        }
+
+        let mut results = Vec::new();
+        let mut total_added = 0;
+
+        for (space, space_requests) in by_space {
+            // Ensure space is loaded
+            self.load_or_create_space(&space).await?;
+
+            let local_space = self.get_local_space(&space)?;
+
+            let mut added = Vec::new();
+            let mut skipped = Vec::new();
+
+            for req in space_requests {
+                match local_space.add_request(&req).await? {
+                    Some(s) => skipped.push(s),
+                    None => added.push(req.handle),
+                }
+            }
+
+            total_added += added.len();
+            results.push(SpaceAddResult {
+                space,
+                added,
+                skipped,
+            });
+        }
+
+        Ok(AddResult {
+            by_space: results,
+            total_added,
+        })
+    }
+
+    // =========================================================================
+    // Local Commit
+    // =========================================================================
+
+    /// Check if a local commit can be made for a space.
+    ///
+    /// Returns an error message if commit is blocked, None if allowed.
+    /// Note: If RPC is not available, on-chain finalization checks are skipped.
+    pub async fn can_commit_local(&self, space: &SLabel) -> anyhow::Result<Option<String>> {
+        let local_space = self.get_local_space(space)?;
+        let storage = local_space.storage();
+
+        let last_commitment = storage.get_last_commitment().await?;
+        let staging_count = storage.staged_count().await?;
+
+        if staging_count == 0 {
+            return Ok(Some("no staged changes to commit".to_string()));
+        }
+
+        let Some(commitment) = last_commitment else {
+            // No previous commits, can always commit
+            return Ok(None);
+        };
+
+        // Check if previous commitment needs proving (non-initial commits need proof)
+        if commitment.prev_root.is_some() {
+            // This was a non-initial commit, needs proof
+            let has_proof = commitment.step_receipt_id.is_some()
+                && (commitment.aggregate_receipt_id.is_some() || commitment.idx == 1);
+            if !has_proof {
+                return Ok(Some(format!(
+                    "commitment #{} needs proving before new commit",
+                    commitment.idx
+                )));
+            }
+        }
+
+        // On-chain finalization checks require RPC
+        if let Some(rpc) = &self.rpc {
+            // Check on-chain status if there's a commit_txid
+            if commitment.commit_txid.is_some() {
+                // Always check on-chain status via RPC
+                let mut expected_root = [0u8; 32];
+                hex::decode_to_slice(&commitment.root, &mut expected_root)
+                    .map_err(|e| anyhow!("invalid root: {}", e))?;
+
+                let on_chain = rpc.get_commitment(space.clone(), None).await?;
+
+                if let Some(commitment) = on_chain {
+                    if commitment.state_root == expected_root {
+                        // Commit is on-chain, check finalization (144 blocks + 6 safety)
+                        let tip = rpc.get_server_info().await?.tip.height;
+                        let confirmations = tip.saturating_sub(commitment.block_height);
+                        if confirmations < 150 {
+                            return Ok(Some(format!(
+                                "previous commit needs {} more confirmations ({}/150)",
+                                150 - confirmations,
+                                confirmations
+                            )));
+                        }
+                        // Commit is finalized, can proceed
+                    } else {
+                        // Chain has different root - commit may have been replaced
+                        return Ok(Some(
+                            "on-chain commitment root doesn't match local entry".to_string(),
+                        ));
+                    }
+                } else {
+                    // Not on-chain yet
+                    return Ok(Some(
+                        "previous commit pending confirmation on-chain".to_string(),
+                    ));
+                }
+            } else if commitment.idx > 0 {
+                // Non-initial commitment without commit_txid means not committed on-chain yet
+                return Ok(Some(
+                    "previous commit not yet submitted on-chain".to_string(),
+                ));
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Commit staged changes locally.
+    ///
+    /// This validates and commits staged entries to the local database.
+    /// For non-initial commits, this creates a proving request that must be
+    /// fulfilled before the commit can be submitted on-chain.
+    pub async fn commit_local(
+        &self,
+        space: &SLabel,
+    ) -> anyhow::Result<crate::core::SpaceCommitResult> {
+        // Check if we can commit
+        if let Some(reason) = self.can_commit_local(space).await? {
+            return Err(anyhow!("cannot commit: {}", reason));
+        }
+
+        let local_space = self.get_local_space(space)?;
+        local_space.commit(false).await
+    }
+
+    // =========================================================================
+    // Proving
+    // =========================================================================
+
+    /// Get the next proving request for a space.
+    ///
+    /// Returns None if no proving is needed.
+    pub async fn get_next_proving_request(
+        &self,
+        space: &SLabel,
+    ) -> anyhow::Result<Option<ProvingRequest>> {
+        let local_space = self.get_local_space(space)?;
+        local_space.get_next_proving_request().await
+    }
+
+    /// Fulfill a proving request with a receipt.
+    ///
+    /// Verifies and stores the receipt.
+    pub async fn fulfill_request(
+        &self,
+        space: &SLabel,
+        request: &ProvingRequest,
+        receipt_bytes: &[u8],
+    ) -> anyhow::Result<()> {
+        let local_space = self.get_local_space(space)?;
+        local_space.save_proving_receipt(request, receipt_bytes).await
+    }
+
+    /// Fulfill a proving request by commitment ID and type (for binary endpoint)
+    pub async fn fulfill_request_by_id(
+        &self,
+        space: &SLabel,
+        commitment_id: i64,
+        is_fold: bool,
+        receipt_bytes: &[u8],
+    ) -> anyhow::Result<()> {
+        let local_space = self.get_local_space(space)?;
+        local_space
+            .save_proving_receipt_by_id(commitment_id, is_fold, receipt_bytes)
+            .await
+    }
+
+    /// Get input for SNARK compression.
+    pub async fn get_compress_input(
+        &self,
+        space: &SLabel,
+    ) -> anyhow::Result<Option<CompressInput>> {
+        let local_space = self.get_local_space(space)?;
+        local_space.get_compress_input().await
+    }
+
+    /// Save a groth16 (SNARK) receipt.
+    pub async fn save_snark(&self, space: &SLabel, receipt_bytes: &[u8]) -> anyhow::Result<()> {
+        let local_space = self.get_local_space(space)?;
+        local_space.save_groth16_receipt(receipt_bytes).await
+    }
+
+    // =========================================================================
+    // On-Chain Commit
+    // =========================================================================
+
+    /// Commit the latest local entry on-chain.
+    ///
+    /// Broadcasts a transaction to commit the state root on-chain.
+    /// Returns the transaction ID. If fee_rate is None, uses wallet default.
+    pub async fn commit(&self, space: &SLabel, fee_rate: Option<FeeRate>) -> anyhow::Result<Txid> {
+        // Verify we can still operate on this space (delegation may have been revoked)
+        let can_op = self.can_operate(space).await?;
+        if !can_op {
+            return Err(anyhow!(
+                "space '{}' is not delegated to wallet '{}' (delegation may have been revoked)",
+                space,
+                self.wallet
+            ));
+        }
+
+        let local_space = self.get_local_space(space)?;
+        let storage = local_space.storage();
+
+        // Get the latest commitment's root
+        let commitment = storage
+            .get_last_commitment()
+            .await?
+            .ok_or_else(|| anyhow!("no commitments to broadcast"))?;
+
+        // Check if already has a txid
+        if commitment.commit_txid.is_some() {
+            return Err(anyhow!("commitment already has a pending broadcast"));
+        }
+
+        // For non-initial commitments, check that proving is done
+        if commitment.prev_root.is_some() {
+            let has_proof = commitment.step_receipt_id.is_some();
+            if !has_proof {
+                return Err(anyhow!(
+                    "commitment needs proving before on-chain broadcast"
+                ));
+            }
+        }
+
+        let mut root_bytes = [0u8; 32];
+        hex::decode_to_slice(&commitment.root, &mut root_bytes)
+            .map_err(|e| anyhow!("invalid root: {}", e))?;
+
+        // Broadcast the commit transaction
+        let rpc = self.require_rpc()?;
+        let commit_request = RpcWalletRequest::Commit(CommitParams {
+            space: space.clone(),
+            root: Some(sha256::Hash::from_slice(&root_bytes)?),
+        });
+
+        let response = rpc
+            .wallet_send_request(
+                &self.wallet,
+                RpcWalletTxBuilder {
+                    bidouts: None,
+                    requests: vec![commit_request],
+                    fee_rate,
+                    dust: None,
+                    force: false,
+                    confirmed_only: false,
+                    skip_tx_check: false,
+                },
+            )
+            .await?;
+
+        // Check for errors
+        for tx in &response.result {
+            if let Some(e) = tx.error.as_ref() {
+                let s = e
+                    .iter()
+                    .map(|(k, v)| format!("{k}:{v}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(anyhow!("commit failed: {}", s));
+            }
+        }
+
+        let txid: Txid = response
+            .result
+            .first()
+            .map(|r| r.txid)
+            .ok_or_else(|| anyhow!("no txid in response"))?;
+
+        // Store the txid
+        storage
+            .update_commitment_txid(commitment.id, &txid.to_string())
+            .await?;
+
+        Ok(txid)
+    }
+
+    /// Get the status of the on-chain commit for a space.
+    pub async fn get_commit_status(&self, space: &SLabel) -> anyhow::Result<CommitStatus> {
+        let local_space = self.get_local_space(space)?;
+        let db_commitment = local_space.storage().get_last_commitment().await?;
+
+        let Some(db_commitment) = db_commitment else {
+            return Ok(CommitStatus::None);
+        };
+
+        let Some(txid_str) = db_commitment.commit_txid.clone() else {
+            return Ok(CommitStatus::None);
+        };
+
+        let txid: Txid = txid_str
+            .parse()
+            .map_err(|e: bitcoin::hex::HexToArrayError| anyhow!("invalid txid: {}", e))?;
+
+        let mut expected_root = [0u8; 32];
+        hex::decode_to_slice(&db_commitment.root, &mut expected_root)
+            .map_err(|e| anyhow!("invalid root: {}", e))?;
+
+        // Check on-chain state
+        let rpc = self.require_rpc()?;
+        let on_chain = rpc.get_commitment(space.clone(), None).await?;
+
+        if let Some(chain_commitment) = on_chain {
+            if chain_commitment.state_root == expected_root {
+                let tip = rpc.get_server_info().await?.tip.height;
+                let confirmations = tip.saturating_sub(chain_commitment.block_height);
+
+                if confirmations >= 150 {
+                    return Ok(CommitStatus::Finalized {
+                        block_height: chain_commitment.block_height,
+                    });
+                } else {
+                    return Ok(CommitStatus::Confirmed {
+                        txid,
+                        block_height: chain_commitment.block_height,
+                        confirmations,
+                    });
+                }
+            }
+        }
+
+        // Not on-chain yet
+        Ok(CommitStatus::Pending {
+            txid,
+            expected_root,
+        })
+    }
+
+    /// Get pipeline status for UI stepper (offline-friendly version).
+    pub async fn get_pipeline_status(&self, space: &SLabel) -> anyhow::Result<PipelineStatus> {
+        let local_space = self.get_local_space(space)?;
+        let storage = local_space.storage();
+
+        // Get the latest commitment and staged count
+        let commitment = storage.get_last_commitment().await?;
+        let staged_count = storage.staged_count().await?;
+
+        // No commitments yet - show message based on staged count
+        let Some(commitment) = commitment else {
+            let message = if staged_count > 0 {
+                Some(format!(
+                    "{} handle(s) staged. Ready to commit.",
+                    staged_count
+                ))
+            } else {
+                Some("Stage handles to start a new commitment.".to_string())
+            };
+            return Ok(PipelineStatus {
+                has_pending: false,
+                staged_count,
+                commitment_idx: None,
+                root: None,
+                txid: None,
+                steps: PipelineSteps {
+                    local: StepState::Pending,
+                    proving: StepState::Pending,
+                    broadcast: StepState::Pending,
+                    confirmed: StepState::Pending,
+                    finalized: StepState::Pending,
+                    published: StepState::Pending,
+                },
+                current_step: None,
+                message,
+            });
+        };
+
+        let is_initial = commitment.idx == 0;
+        let has_proof = commitment.step_receipt_id.is_some();
+        let is_broadcast = commitment.commit_txid.is_some();
+
+        // Determine step states
+        let local = StepState::Complete; // Always complete if commitment exists
+
+        let proving = if is_initial {
+            StepState::Skipped
+        } else if has_proof {
+            StepState::Complete
+        } else {
+            StepState::InProgress
+        };
+
+        // For broadcast/confirmed/finalized/published, check on-chain state
+        let (broadcast, confirmed, finalized, published, current_step, message, is_done) =
+            if !is_broadcast {
+                // Not broadcast yet
+                if is_initial || has_proof {
+                    (
+                        StepState::InProgress,
+                        StepState::Pending,
+                        StepState::Pending,
+                        StepState::Pending,
+                        Some("broadcast".to_string()),
+                        Some("Ready to broadcast".to_string()),
+                        false,
+                    )
+                } else {
+                    (
+                        StepState::Pending,
+                        StepState::Pending,
+                        StepState::Pending,
+                        StepState::Pending,
+                        Some("proving".to_string()),
+                        Some("Proving required before broadcast".to_string()),
+                        false,
+                    )
+                }
+            } else {
+                // Broadcast - check on-chain status
+                let mut on_chain_info: Option<u32> = None; // confirmations
+
+                if let Some(rpc) = &self.rpc {
+                    let mut expected_root = [0u8; 32];
+                    if hex::decode_to_slice(&commitment.root, &mut expected_root).is_ok() {
+                        if let Ok(Some(on_chain)) =
+                            rpc.get_commitment(space.clone(), None).await
+                        {
+                            if on_chain.state_root == expected_root {
+                                if let Ok(info) = rpc.get_server_info().await {
+                                    let confirmations =
+                                        info.tip.height.saturating_sub(on_chain.block_height);
+                                    on_chain_info = Some(confirmations);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                match on_chain_info {
+                    Some(conf) if conf >= 150 => {
+                        // Finalized — check publish status
+                        let is_published = commitment.published_at.is_some();
+                        if is_published {
+                            (
+                                StepState::Complete,
+                                StepState::Complete,
+                                StepState::Complete,
+                                StepState::Complete,
+                                None,
+                                Some("Certificates published".to_string()),
+                                true,
+                            )
+                        } else {
+                            (
+                                StepState::Complete,
+                                StepState::Complete,
+                                StepState::Complete,
+                                StepState::InProgress,
+                                Some("published".to_string()),
+                                Some("Ready to publish certificates".to_string()),
+                                false,
+                            )
+                        }
+                    }
+                    Some(conf) => {
+                        // Confirmed but not finalized
+                        (
+                            StepState::Complete,
+                            StepState::Complete,
+                            StepState::InProgress,
+                            StepState::Pending,
+                            Some("finalized".to_string()),
+                            Some(format!("{}/150 confirmations", conf)),
+                            false,
+                        )
+                    }
+                    None => {
+                        // Not confirmed yet
+                        (
+                            StepState::Complete,
+                            StepState::InProgress,
+                            StepState::Pending,
+                            StepState::Pending,
+                            Some("confirmed".to_string()),
+                            Some("Waiting for confirmation".to_string()),
+                            false,
+                        )
+                    }
+                }
+            };
+
+        // has_pending is true until fully done (published)
+        let has_pending = !is_done;
+
+        Ok(PipelineStatus {
+            has_pending,
+            staged_count,
+            commitment_idx: Some(commitment.idx),
+            root: Some(commitment.root),
+            txid: commitment.commit_txid,
+            steps: PipelineSteps {
+                local,
+                proving,
+                broadcast,
+                confirmed,
+                finalized,
+                published,
+            },
+            current_step,
+            message,
+        })
+    }
+
+    /// Bump the fee for a pending commit.
+    pub async fn bump_commit(&self, space: &SLabel, fee_rate: FeeRate) -> anyhow::Result<Txid> {
+        let status = self.get_commit_status(space).await?;
+
+        let txid = match status {
+            CommitStatus::Pending { txid, .. } => txid,
+            CommitStatus::None => return Err(anyhow!("no pending commit to bump")),
+            CommitStatus::Confirmed { .. } | CommitStatus::Finalized { .. } => {
+                return Err(anyhow!("commit already confirmed, cannot bump"))
+            }
+        };
+
+        // Use wallet RBF to bump fee
+        let rpc = self.require_rpc()?;
+        let responses = rpc
+            .wallet_bump_fee(&self.wallet, txid, fee_rate, false)
+            .await?;
+
+        let new_txid = responses
+            .first()
+            .map(|r| r.txid)
+            .ok_or_else(|| anyhow!("no txid in bump response"))?;
+
+        // Update stored txid
+        let local_space = self.get_local_space(space)?;
+        let storage = local_space.storage();
+        let commitment = storage
+            .get_last_commitment()
+            .await?
+            .ok_or_else(|| anyhow!("no commitment"))?;
+        storage
+            .update_commitment_txid(commitment.id, &new_txid.to_string())
+            .await?;
+
+        Ok(new_txid)
+    }
+
+    pub async fn submit_certs(&self, certs: Vec<Certificate>) -> anyhow::Result<()> {
+        log::info!("submit_certs: building message for {} certs", certs.len());
+        let msg = self.build_message(certs).await?;
+        log::info!("submit_certs: message built, broadcasting via fabric");
+        let fabric = self.require_fabric()?;
+        let relays = fabric.bootstrap().await.map_err(|e| anyhow!("fabric bootstrap error: {}", e))?;
+
+        log::info!("relays available: {:?}", relays);
+        fabric.broadcast(&msg.to_bytes()).await.map_err(|e| anyhow!("Could not broadcast message: {}", e))?;
+        log::info!("submit_certs: broadcast OK");
+        Ok(())
+    }
+
+    pub async fn build_message(&self, certs: Vec<Certificate>) -> anyhow::Result<Message> {
+        log::info!("build_message: building chain proof request");
+        let req = ChainProofRequest::from_certificates(certs.iter());
+        for r in &req.spaces {
+            log::info!("chain proof request has space: {}", r);
+        }
+        let rpc = self.require_rpc()?;
+        log::info!("build_message: calling build_chain_proof RPC");
+        let res = rpc.build_chain_proof(req, None).await?;
+        log::info!("build_message: chain proof received");
+
+        let stree =
+            SubTree::<Sha256Hasher>::from_slice(res.spaces_proof.as_slice())
+            .map_err(|e| anyhow!("could not decode spaces proof: {}", e))?;
+        let ptree =
+            SubTree::<Sha256Hasher>::from_slice(res.ptrs_proof.as_slice())
+            .map_err(|e| anyhow!("could not decode ptrs proof: {}", e))?;
+
+        let chain_proof = ChainProof {
+            anchor: res.block,
+            spaces: SpacesSubtree(stree),
+            ptrs: PtrsSubtree(ptree),
+        };
+        log::info!("build_message: constructing message from certificates");
+        Ok(Message::try_from_certificates(chain_proof, certs)?)
+    }
+
+    /// Issue a certificate for a single handle or space.
+    ///
+    /// Returns `(root_cert, Option<handle_cert>)`:
+    /// - For `@space`: returns `(root_cert, None)`
+    /// - For `alice@space`: returns `(root_cert, Some(handle_cert))`
+    pub async fn issue_cert(
+        &self,
+        handle: &SName,
+    ) -> anyhow::Result<(Certificate, Option<Certificate>)> {
+        let certs = self.issue_certs(vec![handle.clone()]).await?;
+        let mut iter = certs.into_iter();
+        let root_cert = iter.next().ok_or_else(|| anyhow!("missing root cert"))?;
+        let handle_cert = iter.next();
+        Ok((root_cert, handle_cert))
+    }
+
+    pub async fn issue_certs(&self, handles: Vec<SName>) -> anyhow::Result<Vec<Certificate>> {
+        let mut certs = Vec::new();
+        struct SpaceData {
+            space: SLabel,
+            sptr: Sptr,
+            handles: Vec<SName>,
+            fso: FullSpaceOut,
+            fdo: FullPtrOut,
+        }
+
+        let mut by_space = HashMap::new();
+        for handle in handles {
+            if !handle.is_single_label() && handle.label_count() != 2 {
+                return Err(anyhow!("cannot issue cert for handle: {}", handle));
+            }
+            by_space
+                .entry(handle.space().unwrap())
+                .or_insert(Vec::new())
+                .push(handle);
+        }
+        let rpc = self.require_rpc()?;
+        let mut space_datas = Vec::new();
+        for (space, handles) in by_space {
+            log::info!("issue_certs: get_space({})", space);
+            let Some(fso) = rpc.get_space(&space.to_string()).await? else {
+                return Err(anyhow!("space not found: {}", space));
+            };
+            log::info!("issue_certs: get_space OK, computing sptr");
+            let sptr = Sptr::from_spk::<Sha256>(fso.spaceout.script_pubkey.clone());
+            log::info!("issue_certs: get_ptr({})", sptr);
+            let Some(fdo) = rpc.get_ptr(spaces_wallet::Subject::Ptr(sptr)).await? else {
+                return Err(anyhow!("no delegate {} found for space {}", sptr, space));
+            };
+            log::info!("issue_certs: get_ptr OK");
+            space_datas.push(SpaceData {
+                space,
+                sptr,
+                handles,
+                fso,
+                fdo,
+            })
+        }
+
+        for space_data in space_datas {
+            let local_space = self.get_local_space(&space_data.space)?;
+
+            log::info!("issue_certs: issuing root cert for {}", space_data.space);
+            let root_cert = local_space
+                .issue_cert(&SName::from_space(&space_data.space).unwrap())
+                .await?;
+            certs.push(root_cert);
+            log::info!("issue_certs: root cert OK");
+
+            for handle in space_data.handles {
+                let sub = handle.subspace().unwrap();
+                let is_final = local_space.lookup_handle(&sub).await?.is_some();
+                log::info!("issue_certs: handle {} is_final={}", handle, is_final);
+                if !is_final {
+                    let Some(script_pubkey) = local_space.get_staged(&sub).await? else {
+                        return Err(anyhow!(
+                            "handle {} neither committed nor staged",
+                            handle
+                        ));
+                    };
+                    log::info!("issue_certs: building zone for {}", handle);
+                    let zone = Zone {
+                        anchor: 0,
+                        sovereignty: SovereigntyState::Dependent,
+                        handle,
+                        script_pubkey: ScriptBuf::from_bytes(script_pubkey),
+                        data: None,
+                        offchain_data: None,
+                        delegate: ProvableOption::Unknown,
+                        commitment: ProvableOption::Unknown,
+                    };
+
+                    log::info!("issue_certs: wallet_sign_schnorr for {}", zone.handle);
+                    let signature_bytes = rpc
+                        .wallet_sign_schnorr(
+                            &self.wallet,
+                            spaces_wallet::Subject::Ptr(space_data.sptr),
+                            Bytes::new(zone.signing_bytes()),
+                        )
+                        .await
+                        .map_err(|e| anyhow!("failed to sign zone: {}", e))?;
+                    log::info!("issue_certs: signature OK");
+
+                    let sig_array: [u8; 64] = signature_bytes
+                        .to_vec()
+                        .try_into()
+                        .map_err(|_| anyhow!("signature must be 64 bytes"))?;
+
+                    log::info!("issue_certs: issuing temp cert for {}", zone.handle);
+                    let cert = local_space
+                        .issue_temp_cert(&zone.handle, sig_array)
+                        .await?;
+                    certs.push(cert);
+                    log::info!("issue_certs: temp cert OK");
+                    continue;
+                }
+
+                // final cert
+                log::info!("issue_certs: issuing final cert for {}", handle);
+                let cert = local_space.issue_cert(&handle).await?;
+                certs.push(cert);
+                log::info!("issue_certs: final cert OK");
+            }
+        }
+
+        Ok(certs)
+    }
+
+    // =========================================================================
+    // Certificate Publishing
+    // =========================================================================
+
+    /// Publish temp certificates for unpublished staged handles.
+    ///
+    /// Issues temp certs for all staged handles that haven't been published yet
+    /// and broadcasts them via fabric. Returns the number of handles published.
+    pub async fn publish_staged_certs(&self, space: &SLabel) -> anyhow::Result<usize> {
+        self.require_fabric()?;
+
+        let local_space = self.get_local_space(space)?;
+        let storage = local_space.storage();
+
+        let unpublished = storage.list_unpublished_staged().await?;
+        if unpublished.is_empty() {
+            return Ok(0);
+        }
+
+        let handle_names: Vec<SName> = unpublished
+            .iter()
+            .map(|h| format!("{}@{}", h.name, space.as_str_unprefixed().unwrap()).parse())
+            .collect::<Result<_, _>>()
+            .map_err(|e| anyhow!("invalid handle name: {}", e))?;
+
+        let names: Vec<String> = unpublished.iter().map(|h| h.name.clone()).collect();
+        let count = names.len();
+
+        let certs = self.issue_certs(handle_names).await?;
+        self.submit_certs(certs).await?;
+
+        storage.mark_handles_published(&names, "temp").await?;
+        Ok(count)
+    }
+
+    /// Publish final certificates for a finalized commitment.
+    ///
+    /// Issues final certs for all committed handles that haven't been published
+    /// as final yet and broadcasts them via fabric. Returns the number of handles published.
+    pub async fn publish_final_certs(&self, space: &SLabel) -> anyhow::Result<usize> {
+        self.require_fabric()?;
+
+        let local_space = self.get_local_space(space)?;
+        let storage = local_space.storage();
+
+        // Verify the commitment is finalized
+        let commitment = storage
+            .get_last_commitment()
+            .await?
+            .ok_or_else(|| anyhow!("no commitments found"))?;
+
+        if commitment.published_at.is_some() {
+            return Err(anyhow!("commitment already published"));
+        }
+
+        let commit_status = self.get_commit_status(space).await?;
+        match commit_status {
+            CommitStatus::Finalized { .. } => {}
+            _ => return Err(anyhow!("commitment not yet finalized")),
+        }
+
+        let unpublished = storage.list_unpublished_committed().await?;
+        if unpublished.is_empty() {
+            // No handles to publish but mark commitment as published
+            storage.mark_commitment_published(commitment.id).await?;
+            return Ok(0);
+        }
+
+        let handle_names: Vec<SName> = unpublished
+            .iter()
+            .map(|h| format!("{}@{}", h.name, space.as_str_unprefixed().unwrap()).parse())
+            .collect::<Result<_, _>>()
+            .map_err(|e| anyhow!("invalid handle name: {}", e))?;
+
+        let names: Vec<String> = unpublished.iter().map(|h| h.name.clone()).collect();
+        let count = names.len();
+
+        let certs = self.issue_certs(handle_names).await?;
+        self.submit_certs(certs).await?;
+
+        storage.mark_handles_published(&names, "final").await?;
+        storage.mark_commitment_published(commitment.id).await?;
+        Ok(count)
+    }
+
+    /// Verify a certificate using anchors from the chain.
+    pub async fn verify_certificate(
+        &self,
+        cert: Certificate,
+        root_cert: Option<Certificate>,
+    ) -> anyhow::Result<VerifyCertResult> {
+        let rpc = self.require_rpc()?;
+        let anchors = rpc
+            .get_root_anchors()
+            .await
+            .map_err(|e| anyhow!("could not load anchors: {}", e))?;
+
+        // TODO: unify RootAnchor type
+        let veritas_anchors = serde_json::to_string_pretty(&anchors).expect("anchors");
+        let veritas_anchors: Vec<RootAnchor> =
+            serde_json::from_str(&veritas_anchors).expect("decode anchors");
+
+        verify_certificate_with_anchors(cert, root_cert, veritas_anchors)
+    }
+}
+
+/// Verify a certificate with provided anchors (static function).
+pub fn verify_certificate_with_anchors(
+    _cert: Certificate,
+    _root_cert: Option<Certificate>,
+    anchors: Vec<RootAnchor>,
+) -> anyhow::Result<VerifyCertResult> {
+    let _veritas = libveritas::Veritas::new().with_anchors(anchors)
+        .map_err(|e| anyhow!("invalid anchors: {}", e))?;
+    todo!("verify certificate")
 }

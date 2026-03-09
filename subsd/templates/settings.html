@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - subsd{% endblock %}
+
+{% block nav_settings %}text-bitcoin-600 font-semibold{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">Settings</h1>
+        <p class="mt-1 text-sm text-gray-500">Configure external service endpoints</p>
+    </div>
+
+    <!-- Prover Endpoint -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Prover Server</h2>
+        <p class="text-sm text-gray-500 mb-4">
+            The prover server generates ZK proofs for commitments. Run <code class="bg-gray-100 px-1 rounded">subs-prover --server</code> on a GPU-enabled machine.
+        </p>
+
+        <div class="flex gap-3">
+            <div class="flex-1">
+                <label for="prover-endpoint" class="block text-sm font-medium text-gray-700 mb-1">Endpoint URL</label>
+                <input type="text" id="prover-endpoint" placeholder="http://localhost:7778"
+                    class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-bitcoin-500 focus:border-bitcoin-500">
+            </div>
+            <div class="flex items-end gap-2">
+                <button onclick="testProverEndpoint()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-bitcoin-500">
+                    Test
+                </button>
+                <button onclick="saveProverEndpoint()" class="px-4 py-2 text-sm font-medium text-white bg-bitcoin-500 rounded-md hover:bg-bitcoin-600 focus:outline-none focus:ring-2 focus:ring-bitcoin-500">
+                    Save
+                </button>
+            </div>
+        </div>
+        <div id="prover-status" class="mt-2 text-sm hidden"></div>
+    </div>
+
+    <!-- Registry Endpoint -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Registry Server</h2>
+        <p class="text-sm text-gray-500 mb-4">
+            The registry server handles handle registration requests and webhooks. This is typically a custom server you build for your infrastructure.
+        </p>
+
+        <div class="flex gap-3">
+            <div class="flex-1">
+                <label for="registry-endpoint" class="block text-sm font-medium text-gray-700 mb-1">Endpoint URL</label>
+                <input type="text" id="registry-endpoint" placeholder="https://registry.example.com"
+                    class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-bitcoin-500 focus:border-bitcoin-500">
+            </div>
+            <div class="flex items-end gap-2">
+                <button onclick="testRegistryEndpoint()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-bitcoin-500">
+                    Test
+                </button>
+                <button onclick="saveRegistryEndpoint()" class="px-4 py-2 text-sm font-medium text-white bg-bitcoin-500 rounded-md hover:bg-bitcoin-600 focus:outline-none focus:ring-2 focus:ring-bitcoin-500">
+                    Save
+                </button>
+            </div>
+        </div>
+        <div id="registry-status" class="mt-2 text-sm hidden"></div>
+
+        <!-- Sync from Registry (only shown when configured) -->
+        <div id="registry-sync-section" class="mt-6 pt-6 border-t border-gray-200 hidden">
+            <h3 class="text-sm font-semibold text-gray-900 mb-2">Sync Handles</h3>
+            <p class="text-sm text-gray-500 mb-3">
+                Pull pending handle registrations from the registry server and stage them locally.
+            </p>
+            <div class="flex items-center gap-3">
+                <button onclick="syncFromRegistry()" id="sync-btn" class="px-4 py-2 text-sm font-medium text-white bg-bitcoin-500 rounded-md hover:bg-bitcoin-600 focus:outline-none focus:ring-2 focus:ring-bitcoin-500">
+                    Sync Now
+                </button>
+                <span id="sync-status" class="text-sm text-gray-500"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Current Configuration -->
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-6">
+        <h3 class="text-sm font-medium text-gray-700 mb-3">Current Configuration</h3>
+        <div class="space-y-2 text-sm mono">
+            <div class="flex">
+                <span class="text-gray-500 w-40">prover_endpoint:</span>
+                <span id="current-prover" class="text-gray-900">-</span>
+            </div>
+            <div class="flex">
+                <span class="text-gray-500 w-40">registry_endpoint:</span>
+                <span id="current-registry" class="text-gray-900">-</span>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadConfig() {
+    try {
+        const response = await fetch('/config');
+        const config = await response.json();
+
+        document.getElementById('prover-endpoint').value = config.prover_endpoint || '';
+        document.getElementById('registry-endpoint').value = config.registry_endpoint || '';
+        document.getElementById('current-prover').textContent = config.prover_endpoint || '(not set)';
+        document.getElementById('current-registry').textContent = config.registry_endpoint || '(not set)';
+
+        // Show/hide sync section based on registry config
+        updateSyncSection(config.registry_endpoint);
+    } catch (e) {
+        console.error('Failed to load config:', e);
+    }
+}
+
+function showStatus(elementId, message, isSuccess) {
+    const el = document.getElementById(elementId);
+    el.textContent = message;
+    el.className = `mt-2 text-sm ${isSuccess ? 'text-green-600' : 'text-red-600'}`;
+    el.classList.remove('hidden');
+
+    // Hide after 5 seconds
+    setTimeout(() => {
+        el.classList.add('hidden');
+    }, 5000);
+}
+
+async function testProverEndpoint() {
+    const endpoint = document.getElementById('prover-endpoint').value.trim();
+    if (!endpoint) {
+        showStatus('prover-status', 'Please enter an endpoint URL', false);
+        return;
+    }
+
+    showStatus('prover-status', 'Testing connection...', true);
+
+    try {
+        const response = await fetch('/config/test/prover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            showStatus('prover-status', 'Connection successful', true);
+        } else {
+            showStatus('prover-status', result.error || 'Connection failed', false);
+        }
+    } catch (e) {
+        showStatus('prover-status', `Error: ${e.message}`, false);
+    }
+}
+
+async function testRegistryEndpoint() {
+    const endpoint = document.getElementById('registry-endpoint').value.trim();
+    if (!endpoint) {
+        showStatus('registry-status', 'Please enter an endpoint URL', false);
+        return;
+    }
+
+    showStatus('registry-status', 'Testing connection...', true);
+
+    try {
+        const response = await fetch('/config/test/registry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            showStatus('registry-status', 'Connection successful', true);
+        } else {
+            showStatus('registry-status', result.error || 'Connection failed', false);
+        }
+    } catch (e) {
+        showStatus('registry-status', `Error: ${e.message}`, false);
+    }
+}
+
+async function saveProverEndpoint() {
+    const endpoint = document.getElementById('prover-endpoint').value.trim();
+
+    try {
+        const response = await fetch('/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prover_endpoint: endpoint || null })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            showStatus('prover-status', 'Saved successfully', true);
+            document.getElementById('current-prover').textContent = endpoint || '(not set)';
+        } else {
+            showStatus('prover-status', 'Failed to save', false);
+        }
+    } catch (e) {
+        showStatus('prover-status', `Error: ${e.message}`, false);
+    }
+}
+
+async function saveRegistryEndpoint() {
+    const endpoint = document.getElementById('registry-endpoint').value.trim();
+
+    try {
+        const response = await fetch('/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ registry_endpoint: endpoint || null })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            showStatus('registry-status', 'Saved successfully', true);
+            document.getElementById('current-registry').textContent = endpoint || '(not set)';
+            updateSyncSection(endpoint);
+        } else {
+            showStatus('registry-status', 'Failed to save', false);
+        }
+    } catch (e) {
+        showStatus('registry-status', `Error: ${e.message}`, false);
+    }
+}
+
+function updateSyncSection(registryEndpoint) {
+    const syncSection = document.getElementById('registry-sync-section');
+    if (registryEndpoint) {
+        syncSection.classList.remove('hidden');
+    } else {
+        syncSection.classList.add('hidden');
+    }
+}
+
+async function syncFromRegistry() {
+    const btn = document.getElementById('sync-btn');
+    const status = document.getElementById('sync-status');
+
+    btn.disabled = true;
+    btn.textContent = 'Syncing...';
+    status.textContent = '';
+    status.className = 'text-sm text-gray-500';
+
+    try {
+        const response = await fetch('/registry/sync', {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+            status.textContent = `Pulled ${result.pulled}, staged ${result.staged}`;
+            status.className = 'text-sm text-green-600';
+        } else if (response.ok) {
+            const errorMsg = result.errors?.join(', ') || 'Unknown error';
+            status.textContent = `Partial: staged ${result.staged}, errors: ${errorMsg}`;
+            status.className = 'text-sm text-yellow-600';
+        } else {
+            status.textContent = result.error || 'Sync failed';
+            status.className = 'text-sm text-red-600';
+        }
+    } catch (e) {
+        status.textContent = `Error: ${e.message}`;
+        status.className = 'text-sm text-red-600';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Sync Now';
+    }
+}
+
+// Load config on page load
+loadConfig();
+</script>
+{% endblock %}

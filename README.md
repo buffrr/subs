@@ -133,3 +133,84 @@ BONSAI_API_KEY="YOUR_API_KEY" BONSAI_API_URL="BONSAI_URL" subs compress
 ## License
 
 This project is licensed under the [Apache 2.0](LICENSE).
+
+
+## Operator API
+
+
+```
+let operator = Operator::new(dir, "my_wallet", client);
+
+// also operator should have an async api 
+// when we do a db operation we should call spawn_blocking
+// operator internally hold a structure containg opened LocalSpace objects
+// when we call load_space
+operator.load_space("@bitcoin")?;
+operator.load_space("@nostr")?;
+
+// these are Handlerequet objcts but just for pesudo example ...
+operator.stage_request("alice@bitcoin")?;
+operator.issue_cert("alice@bitcoin")?;
+
+// we can call list_spaces on loaded spaces we dont need to scan the dir
+operator.list_spaces()?;
+
+// commits the staged changes locally and returns the next proving request
+operator.commit_local("@bitcion")?;
+
+// Trying to commit again should fail until the proving request is completed
+assert!(operator.commit_local("@bitcoin").is_error())?;
+
+// we can continue to stage new requests though
+operator.stage_request("bob@bitcoin")?;
+operator.issue_cert("bob@bitcoin")?; // temp cert
+
+let proving_request = operator.get_next_proving_request("@bitcoin")?;
+
+// prover should be a seperate struct decoupled from operator
+let prover = Prover::new();  /// ...
+let receipt = prover.prove(proving_request)?;
+
+operator.fulfill_request(proving_request, receipt);
+
+// now request is fulfilled
+// trying to commit again locally should fail
+// until the previous commitment was made on-chain
+assert!(operator.commit_local("@bitcoin").is_error())?;
+
+// ok then lets commit on-chain
+let tx_result = operator.commit("@bitcoin" // should be slabel, fee_rate)?; 
+
+
+// trying to commit locally should fail because tx isn't mined yet
+assert!(operator.commit_local("@bitcoin" ).is_error())?;
+
+// trying to commit locally should fail because tx isn't finalized yet
+// it takes 144 blocks to finalize a commitment
+// so we should wait at least 145 blocks maybe add 6 confirmations on top
+// for safety
+assert!(operator.commit_local("@bitcoin" ).is_error())?;
+
+// ok lets say tx mined we can redo the process now
+
+
+
+
+```
+
+
+
+To operate this space, ask the owner to delegate it to this address:
+
+
+[space address] (from wallet)
+
+
+Using space-cli:
+
+```
+space-cli delegate @example --to <space-address>
+```
+
+
+[Operate space button: first it checks if we can operate it then add the space if we can]

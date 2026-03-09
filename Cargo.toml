@@ -1,6 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["subs"]
+members = ["subs", "prover", "types", "subsd", "examples/registry-server"]
+
+[workspace.dependencies]
+libveritas = { git = "https://github.com/spacesprotocol/libveritas.git", features = ["elf"] }
+libveritas_zk = { git = "https://github.com/spacesprotocol/libveritas.git"}
+libveritas_testutil = { git = "https://github.com/spacesprotocol/libveritas.git" }
+subs-types = { path = "types" }
+subs-prover = { path = "prover" }
+
 
 # Always optimize; building and running the guest takes much longer without optimization.
 [profile.dev]

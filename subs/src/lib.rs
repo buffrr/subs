@@ -1,4 +1,6 @@
 pub mod app;
+pub mod core;
+pub mod storage;
 
 use serde::{Serialize, Deserialize};
 use spacedb::NodeHasher;
@@ -7,6 +9,23 @@ use spaces_protocol::slabel::SLabel;
 use spacedb::Sha256Hasher as sha256;
 use libveritas::sname::{Label, SName};
 pub extern crate spaces_protocol;
+
+// Re-export key types for library users
+pub use crate::app::{Operator, HandleInfo, HandlesListResult, PipelineStatus, PipelineSteps, StepState};
+pub use crate::core::{
+    AddResult, SpaceAddResult, SkippedEntry, SkipReason,
+    SpaceCommitResult, StatusResult, SpaceStatus,
+    SpaceProveResult, StepProveInfo,
+    SpaceCompressResult,
+    VerifyCertResult,
+};
+
+// Re-export shared types
+pub use subs_types::{ProvingRequest, CompressInput};
+
+// Re-export libveritas types for certificate handling
+pub use libveritas::cert::Certificate;
+pub use spaces_ptr::RootAnchor;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HandleRequest {
