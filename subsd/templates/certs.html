@@ -1,191 +1,73 @@
 {% extends "base.html" %}
-
 {% block title %}Certificates - subsd{% endblock %}
-
-{% block nav_certs %}text-bitcoin-600 font-semibold{% endblock %}
+{% block nav_certs_cls %}text-zinc-100 nav-active{% endblock %}
+{% block nav_certs_icon %}text-accent-500{% endblock %}
 
 {% block content %}
-<div class="space-y-6">
-    <h1 class="text-xl font-semibold text-gray-900">Certificates</h1>
-
-    <!-- Issue certificate -->
-    <div class="bg-white rounded-sm shadow-sm p-6">
-        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">Issue Certificate</h2>
-        <form id="issueCertForm" class="space-y-4">
-            <div>
-                <label for="certHandle" class="block text-sm font-medium text-gray-700 mb-1">Handle</label>
-                <input type="text" id="certHandle" name="handle" placeholder="alice@example or @example"
-                    class="block w-full rounded-sm border border-gray-200 bg-white shadow-inner focus:border-bitcoin-500 focus:ring-1 focus:ring-bitcoin-500 sm:text-sm px-3 py-2.5"
-                    required>
-                <p class="mt-1.5 text-xs text-gray-500">Use @space for root cert only, or handle@space for handle cert</p>
-            </div>
-            <button type="submit" class="rounded-sm bg-bitcoin-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-bitcoin-600 transition-colors">
-                Issue Certificate
-            </button>
-        </form>
+<div class="space-y-8 animate-fade-in">
+    <div>
+        <h1 class="text-2xl font-bold text-zinc-100 tracking-tight">Certificates</h1>
+        <p class="mt-1 text-sm text-zinc-500">Issue and verify certificates for handles and spaces</p>
     </div>
 
-    <!-- Verify certificate -->
-    <div class="bg-white rounded-sm shadow-sm p-6">
-        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">Verify Certificate</h2>
-        <form id="verifyCertForm" class="space-y-4">
-            <div>
-                <label for="certData" class="block text-sm font-medium text-gray-700 mb-1">Certificate (base64)</label>
-                <textarea id="certData" rows="3" placeholder="Base64-encoded certificate..."
-                    class="block w-full rounded-sm border border-gray-200 bg-white shadow-inner focus:border-bitcoin-500 focus:ring-1 focus:ring-bitcoin-500 sm:text-sm px-3 py-2.5 mono"></textarea>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="card rounded-3xl overflow-hidden">
+            <div class="border-b divider px-6 py-4 flex items-center gap-2.5">
+                <div class="flex h-7 w-7 items-center justify-center rounded-xl bg-orange-500/10">
+                    <svg class="h-3.5 w-3.5 text-accent-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                </div>
+                <h2 class="text-sm font-semibold text-zinc-300">Issue Certificate</h2>
             </div>
-            <div>
-                <label for="rootCertData" class="block text-sm font-medium text-gray-700 mb-1">Root Certificate (base64, optional)</label>
-                <textarea id="rootCertData" rows="3" placeholder="Base64-encoded root certificate..."
-                    class="block w-full rounded-sm border border-gray-200 bg-white shadow-inner focus:border-bitcoin-500 focus:ring-1 focus:ring-bitcoin-500 sm:text-sm px-3 py-2.5 mono"></textarea>
+            <div class="p-6">
+                <form id="issueCertForm" class="space-y-4">
+                    <div>
+                        <label for="certHandle" class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">Handle</label>
+                        <input type="text" id="certHandle" placeholder="alice@example or @example" class="block w-full rounded-xl input-field px-3.5 py-2.5 text-sm transition-all" required>
+                        <p class="mt-1.5 text-xs text-zinc-500">@space for root cert, handle@space for handle cert</p>
+                    </div>
+                    <button type="submit" class="w-full btn-primary rounded-xl px-5 py-2.5 text-sm font-medium text-white transition-all duration-200">Issue Certificate</button>
+                </form>
             </div>
-            <button type="submit" class="rounded-sm bg-bitcoin-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-bitcoin-600 transition-colors">
-                Verify
-            </button>
-        </form>
+        </div>
+
+        <div class="card rounded-3xl overflow-hidden">
+            <div class="border-b divider px-6 py-4 flex items-center gap-2.5">
+                <div class="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-500/10">
+                    <svg class="h-3.5 w-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                </div>
+                <h2 class="text-sm font-semibold text-zinc-300">Verify Certificate</h2>
+            </div>
+            <div class="p-6">
+                <form id="verifyCertForm" class="space-y-4">
+                    <div>
+                        <label for="certData" class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">Certificate <span class="normal-case text-zinc-600">(base64)</span></label>
+                        <textarea id="certData" rows="3" placeholder="Base64-encoded cert..." class="block w-full rounded-xl input-field px-3.5 py-2.5 text-sm font-mono transition-all resize-none"></textarea>
+                    </div>
+                    <div>
+                        <label for="rootCertData" class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">Root Cert <span class="normal-case text-zinc-600">(optional)</span></label>
+                        <textarea id="rootCertData" rows="3" placeholder="Base64-encoded root cert..." class="block w-full rounded-xl input-field px-3.5 py-2.5 text-sm font-mono transition-all resize-none"></textarea>
+                    </div>
+                    <button type="submit" class="w-full rounded-xl px-5 py-2.5 text-sm font-medium text-white transition-all duration-200" style="background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 0 20px rgba(16,185,129,0.2)">Verify</button>
+                </form>
+            </div>
+        </div>
     </div>
 
-    <!-- Results -->
-    <div id="certResults" class="hidden bg-white rounded-sm shadow-sm p-6">
-        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">Result</h2>
-        <div id="certResultsContent"></div>
+    <div id="certResults" class="hidden animate-fade-in">
+        <div class="card rounded-3xl overflow-hidden">
+            <div class="border-b divider px-6 py-4"><h2 class="text-sm font-semibold text-zinc-300">Result</h2></div>
+            <div class="p-6" id="certResultsContent"></div>
+        </div>
     </div>
 </div>
 {% endblock %}
-
 {% block scripts %}
 <script>
-document.getElementById('issueCertForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const handle = document.getElementById('certHandle').value;
-
-    try {
-        const response = await fetch(`/certs/${encodeURIComponent(handle)}`);
-        const result = await response.json();
-
-        if (response.ok) {
-            showCertResults({
-                success: true,
-                root_cert: result.root_cert,
-                handle_cert: result.handle_cert,
-                message: 'Certificates issued successfully'
-            }, true);
-        } else {
-            showCertResults({ error: result }, false);
-        }
-    } catch (e) {
-        showCertResults({ error: e.message }, false);
-    }
-});
-
-document.getElementById('verifyCertForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const cert = document.getElementById('certData').value.trim();
-    const rootCert = document.getElementById('rootCertData').value.trim();
-
-    if (!cert) {
-        showCertResults({ error: 'Certificate is required' }, false);
-        return;
-    }
-
-    try {
-        const response = await fetch('/certs/verify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                cert: cert,
-                root_cert: rootCert || undefined
-            })
-        });
-        const result = await response.json();
-
-        if (response.ok) {
-            showCertResults(result, result.valid);
-        } else {
-            showCertResults({ error: result }, false);
-        }
-    } catch (e) {
-        showCertResults({ error: e.message }, false);
-    }
-});
-
-function showCertResults(data, isSuccess) {
-    const resultsDiv = document.getElementById('certResults');
-    const content = document.getElementById('certResultsContent');
-    resultsDiv.classList.remove('hidden');
-
-    if (data.error) {
-        content.innerHTML = `<div class="text-red-600">${escapeHtml(JSON.stringify(data.error, null, 2))}</div>`;
-        return;
-    }
-
-    let html = '';
-
-    if (data.valid !== undefined) {
-        const validClass = data.valid ? 'text-green-600' : 'text-red-600';
-        const validText = data.valid ? 'VALID' : 'INVALID';
-        html += `<div class="mb-4"><span class="font-medium ${validClass}">${validText}</span></div>`;
-    }
-
-    if (data.message) {
-        html += `<div class="mb-4 text-gray-600 text-sm">${escapeHtml(data.message)}</div>`;
-    }
-
-    if (data.root_cert) {
-        html += `
-            <div class="mb-4">
-                <label class="block text-xs font-medium text-gray-500 mb-1">Root Certificate</label>
-                <div class="flex">
-                    <textarea readonly class="flex-1 rounded-sm rounded-r-none border border-gray-200 bg-stone-50 text-gray-700 text-xs mono p-2.5" rows="2">${escapeHtml(data.root_cert)}</textarea>
-                    <button onclick="copyToClipboard('${data.root_cert}')" class="rounded-sm rounded-l-none bg-gray-100 px-4 text-gray-600 hover:bg-gray-200 text-sm transition-colors border border-l-0 border-gray-200">Copy</button>
-                </div>
-            </div>
-        `;
-    }
-
-    if (data.handle_cert) {
-        html += `
-            <div class="mb-4">
-                <label class="block text-xs font-medium text-gray-500 mb-1">Handle Certificate</label>
-                <div class="flex">
-                    <textarea readonly class="flex-1 rounded-sm rounded-r-none border border-gray-200 bg-stone-50 text-gray-700 text-xs mono p-2.5" rows="2">${escapeHtml(data.handle_cert)}</textarea>
-                    <button onclick="copyToClipboard('${data.handle_cert}')" class="rounded-sm rounded-l-none bg-gray-100 px-4 text-gray-600 hover:bg-gray-200 text-sm transition-colors border border-l-0 border-gray-200">Copy</button>
-                </div>
-            </div>
-        `;
-    }
-
-    if (data.root_zone) {
-        html += `
-            <div class="mb-4">
-                <label class="block text-xs font-medium text-gray-500 mb-1">Root Zone</label>
-                <pre class="bg-stone-50 rounded-sm p-3 text-xs text-gray-700 mono overflow-x-auto">${escapeHtml(JSON.stringify(data.root_zone, null, 2))}</pre>
-            </div>
-        `;
-    }
-
-    if (data.leaf_zone) {
-        html += `
-            <div class="mb-4">
-                <label class="block text-xs font-medium text-gray-500 mb-1">Leaf Zone</label>
-                <pre class="bg-stone-50 rounded-sm p-3 text-xs text-gray-700 mono overflow-x-auto">${escapeHtml(JSON.stringify(data.leaf_zone, null, 2))}</pre>
-            </div>
-        `;
-    }
-
-    content.innerHTML = html;
-}
-
-function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => {
-        alert('Copied to clipboard!');
-    });
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+document.getElementById('issueCertForm').addEventListener('submit',async e=>{e.preventDefault();try{const r=await fetch(`/certs/${encodeURIComponent(document.getElementById('certHandle').value)}`),j=await r.json();showCertResults(r.ok?{success:true,root_cert:j.root_cert,handle_cert:j.handle_cert,message:'Certificates issued'}:{error:j},r.ok)}catch(e){showCertResults({error:e.message},false)}});
+document.getElementById('verifyCertForm').addEventListener('submit',async e=>{e.preventDefault();const c=document.getElementById('certData').value.trim(),rc=document.getElementById('rootCertData').value.trim();if(!c){showCertResults({error:'Certificate required'},false);return}try{const r=await fetch('/certs/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cert:c,root_cert:rc||undefined})}),j=await r.json();showCertResults(r.ok?j:{error:j},j.valid)}catch(e){showCertResults({error:e.message},false)}});
+function showCertResults(d,ok){const w=document.getElementById('certResults'),c=document.getElementById('certResultsContent');w.classList.remove('hidden');if(d.error){c.innerHTML=`<div class="rounded-xl bg-red-500/10 border border-red-500/20 p-4 text-sm text-red-400">${esc(JSON.stringify(d.error,null,2))}</div>`;return}let h='';if(d.valid!==undefined){const cl=d.valid?'bg-emerald-500/10 border-emerald-500/20 text-emerald-400':'bg-red-500/10 border-red-500/20 text-red-400';h+=`<div class="flex items-center gap-2 rounded-xl ${cl} border p-4 mb-5"><span class="font-bold text-sm">${d.valid?'VALID':'INVALID'}</span></div>`}if(d.message)h+=`<p class="mb-5 text-sm text-zinc-500">${esc(d.message)}</p>`;if(d.root_cert)h+=certBlk('Root Certificate',d.root_cert);if(d.handle_cert)h+=certBlk('Handle Certificate',d.handle_cert);if(d.root_zone)h+=jsonBlk('Root Zone',d.root_zone);if(d.leaf_zone)h+=jsonBlk('Leaf Zone',d.leaf_zone);c.innerHTML=h}
+function certBlk(l,v){return`<div class="mb-4"><label class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">${l}</label><div class="flex"><textarea readonly class="flex-1 rounded-l-xl input-field text-zinc-400 text-xs font-mono p-3" rows="2">${esc(v)}</textarea><button onclick="navigator.clipboard.writeText('${v}')" class="rounded-r-xl bg-surface-300 hover:bg-surface-400 px-4 text-zinc-400 hover:text-zinc-200 transition-all border border-l-0 border-zinc-700"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/></svg></button></div></div>`}
+function jsonBlk(l,d){return`<div class="mb-4"><label class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">${l}</label><pre class="bg-surface-200 rounded-xl p-4 text-xs text-zinc-400 font-mono overflow-x-auto border border-zinc-700/50">${esc(JSON.stringify(d,null,2))}</pre></div>`}
+function esc(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML}
 </script>
 {% endblock %}

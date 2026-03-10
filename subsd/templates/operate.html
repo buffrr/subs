@@ -1,107 +1,64 @@
 {% extends "base.html" %}
-
-{% block title %}Operate Space - subsd{% endblock %}
-
-{% block nav_operate %}text-bitcoin-600 font-semibold{% endblock %}
+{% block title %}Operate - subsd{% endblock %}
+{% block nav_operate_cls %}text-zinc-100 nav-active{% endblock %}
+{% block nav_operate_icon %}text-accent-500{% endblock %}
 
 {% block content %}
-<div class="space-y-6">
+<div class="space-y-8 animate-fade-in">
     <div>
-        <a href="/" class="text-sm text-gray-500 hover:text-gray-700 transition-colors">&larr; Back</a>
-        <h1 class="text-xl font-semibold text-gray-900 mt-1">Operate a Space</h1>
+        <div class="flex items-center gap-3">
+            <a href="/" class="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-300 transition-colors">
+                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>Back
+            </a>
+            <div class="h-5 w-px bg-zinc-700"></div>
+            <h1 class="text-2xl font-bold text-zinc-100 tracking-tight">Operate a Space</h1>
+        </div>
+        <p class="mt-1 text-sm text-zinc-500">Delegate a space to this operator, then add it below</p>
     </div>
 
-    <!-- Delegation instructions -->
-    <div class="bg-white rounded-sm shadow-sm p-6">
-        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">Delegation Required</h2>
-        <p class="text-sm text-gray-600 mb-4">
-            To operate a space, the owner must delegate it to this operator's address.
-        </p>
-
-        <div class="mb-6">
-            <label class="block text-sm font-medium text-gray-700 mb-1">Operator Space Address</label>
-            <div class="flex">
-                <input type="text" readonly value="{{ space_address }}"
-                    class="flex-1 rounded-sm rounded-r-none border border-gray-200 bg-stone-50 text-gray-900 sm:text-sm px-3 py-2.5 mono">
-                <button onclick="copyAddress('{{ space_address }}')" class="rounded-sm rounded-l-none bg-gray-100 px-4 text-gray-600 hover:bg-gray-200 text-sm transition-colors border border-l-0 border-gray-200">
-                    Copy
-                </button>
-            </div>
+    <div class="card rounded-3xl overflow-hidden">
+        <div class="border-b divider px-6 py-4 flex items-center gap-3">
+            <span class="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600 text-white text-xs font-bold shadow-lg shadow-orange-500/20">1</span>
+            <h2 class="text-sm font-semibold text-zinc-300">Delegate to this operator</h2>
         </div>
-
-        <div class="bg-stone-50 rounded-sm p-4">
-            <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Using space-cli</p>
-            <pre class="text-sm text-gray-700 mono overflow-x-auto">space-cli delegate @example --to {{ space_address }}</pre>
-        </div>
-    </div>
-
-    <!-- Add space form -->
-    <div class="bg-white rounded-sm shadow-sm p-6">
-        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">Add Space</h2>
-        <form id="operateForm" class="space-y-4">
+        <div class="p-6 space-y-4">
             <div>
-                <label for="spaceName" class="block text-sm font-medium text-gray-700 mb-1">Space Name</label>
-                <input type="text" id="spaceName" name="space" placeholder="@example"
-                    class="block w-full rounded-sm border border-gray-200 bg-white shadow-inner focus:border-bitcoin-500 focus:ring-1 focus:ring-bitcoin-500 sm:text-sm px-3 py-2.5"
-                    required>
-                <p class="mt-1.5 text-xs text-gray-500">Enter the space name including @ (e.g., @example)</p>
+                <label class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">Operator Address</label>
+                <div class="flex">
+                    <input type="text" readonly value="{{ space_address }}" class="flex-1 rounded-l-xl input-field px-3.5 py-2.5 text-sm font-mono">
+                    <button onclick="copyAddress('{{ space_address }}')" class="rounded-r-xl bg-surface-300 hover:bg-surface-400 px-4 text-zinc-400 hover:text-zinc-200 transition-all border border-l-0 border-zinc-700">
+                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/></svg>
+                    </button>
+                </div>
             </div>
+            <div class="bg-surface-200 rounded-xl p-4 border border-zinc-700/50">
+                <p class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">Using space-cli</p>
+                <code class="text-sm text-zinc-300 font-mono">space-cli delegate @example --to {{ space_address }}</code>
+            </div>
+        </div>
+    </div>
 
-            <button type="submit" class="rounded-sm bg-bitcoin-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-bitcoin-600 transition-colors">
-                Check & Operate
-            </button>
-        </form>
-
-        <!-- Result -->
-        <div id="operateResult" class="hidden mt-4 p-4 rounded-sm"></div>
+    <div class="card rounded-3xl overflow-hidden">
+        <div class="border-b divider px-6 py-4 flex items-center gap-3">
+            <span class="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600 text-white text-xs font-bold shadow-lg shadow-orange-500/20">2</span>
+            <h2 class="text-sm font-semibold text-zinc-300">Add space</h2>
+        </div>
+        <div class="p-6">
+            <form id="operateForm" class="space-y-4">
+                <div>
+                    <label for="spaceName" class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">Space Name</label>
+                    <input type="text" id="spaceName" name="space" placeholder="@example" class="block w-full rounded-xl input-field px-3.5 py-2.5 text-sm transition-all" required>
+                </div>
+                <button type="submit" class="btn-primary rounded-xl px-6 py-2.5 text-sm font-medium text-white transition-all duration-200">Check & Operate</button>
+            </form>
+            <div id="operateResult" class="hidden mt-5 p-4 rounded-xl text-sm animate-fade-in"></div>
+        </div>
     </div>
 </div>
 {% endblock %}
-
 {% block scripts %}
 <script>
-function copyAddress(address) {
-    navigator.clipboard.writeText(address).then(() => {
-        // Could show a toast here
-    });
-}
-
-document.getElementById('operateForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    const space = document.getElementById('spaceName').value.trim();
-    const resultDiv = document.getElementById('operateResult');
-
-    if (!space.startsWith('@')) {
-        resultDiv.className = 'mt-4 p-4 rounded-sm bg-red-50 text-red-700';
-        resultDiv.textContent = 'Space name must start with @';
-        resultDiv.classList.remove('hidden');
-        return;
-    }
-
-    resultDiv.className = 'mt-4 p-4 rounded-sm bg-stone-50 text-gray-600';
-    resultDiv.textContent = 'Checking delegation...';
-    resultDiv.classList.remove('hidden');
-
-    try {
-        const response = await fetch(`/spaces/${encodeURIComponent(space)}/operate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-            resultDiv.className = 'mt-4 p-4 rounded-sm bg-green-50 text-green-700';
-            resultDiv.innerHTML = `Space <span class="font-medium mono">${space}</span> is now being operated. <a href="/ui/spaces/${encodeURIComponent(space)}" class="underline">View space</a>`;
-        } else {
-            resultDiv.className = 'mt-4 p-4 rounded-sm bg-red-50 text-red-700';
-            resultDiv.textContent = result.error || 'Failed to operate space';
-        }
-    } catch (e) {
-        resultDiv.className = 'mt-4 p-4 rounded-sm bg-red-50 text-red-700';
-        resultDiv.textContent = `Error: ${e.message}`;
-    }
-});
+function copyAddress(a){navigator.clipboard.writeText(a)}
+document.getElementById('operateForm').addEventListener('submit',async e=>{e.preventDefault();const s=document.getElementById('spaceName').value.trim(),r=document.getElementById('operateResult');if(!s.startsWith('@')){r.className='mt-5 p-4 rounded-xl text-sm bg-red-500/10 text-red-400 border border-red-500/20 animate-fade-in';r.textContent='Space name must start with @';r.classList.remove('hidden');return}r.className='mt-5 p-4 rounded-xl text-sm bg-surface-200 text-zinc-400 border border-zinc-700 animate-fade-in';r.textContent='Checking delegation...';r.classList.remove('hidden');try{const res=await fetch(`/spaces/${encodeURIComponent(s)}/operate`,{method:'POST',headers:{'Content-Type':'application/json'}}),j=await res.json();if(res.ok){r.className='mt-5 p-4 rounded-xl text-sm bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 animate-fade-in';r.innerHTML=`Space <strong class="font-mono">${s}</strong> is now being operated. <a href="/ui/spaces/${encodeURIComponent(s)}" class="underline font-medium">View &rarr;</a>`}else{r.className='mt-5 p-4 rounded-xl text-sm bg-red-500/10 text-red-400 border border-red-500/20 animate-fade-in';r.textContent=j.error||'Failed'}}catch(e){r.className='mt-5 p-4 rounded-xl text-sm bg-red-500/10 text-red-400 border border-red-500/20 animate-fade-in';r.textContent=e.message}});
 </script>
 {% endblock %}

@@ -92,12 +92,17 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     #[cfg(feature = "test-rig")]
-    let _test_rig = if cli.test_rig {
-        Some(run_with_test_rig(cli).await?)
-    } else {
-        run_normal(cli).await?;
-        None
-    };
+    {
+        if cli.test_rig {
+            let handle = run_with_test_rig(cli).await?;
+            // Gracefully stop bitcoind so it flushes blocks to disk
+            if let Err(e) = handle.stop().await {
+                tracing::warn!("Failed to stop bitcoind cleanly: {}", e);
+            }
+        } else {
+            run_normal(cli).await?;
+        }
+    }
 
     #[cfg(not(feature = "test-rig"))]
     run_normal(cli).await?;

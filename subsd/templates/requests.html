@@ -1,179 +1,60 @@
 {% extends "base.html" %}
-
-{% block title %}Add Requests - subsd{% endblock %}
-
-{% block nav_requests %}text-bitcoin-600 font-semibold{% endblock %}
+{% block title %}Requests - subsd{% endblock %}
+{% block nav_requests_cls %}text-zinc-100 nav-active{% endblock %}
+{% block nav_requests_icon %}text-accent-500{% endblock %}
 
 {% block content %}
-<div class="space-y-6">
-    <h1 class="text-xl font-semibold text-gray-900">Add Handle Requests</h1>
-
-    <!-- Add request form -->
-    <div class="bg-white rounded-sm shadow-sm p-6">
-        <form id="addRequestForm" class="space-y-4">
-            <div>
-                <label for="handle" class="block text-sm font-medium text-gray-700 mb-1">Handle</label>
-                <input type="text" id="handle" name="handle" placeholder="alice@example"
-                    class="block w-full rounded-sm border border-gray-200 bg-white shadow-inner focus:border-bitcoin-500 focus:ring-1 focus:ring-bitcoin-500 sm:text-sm px-3 py-2.5"
-                    required>
-                <p class="mt-1.5 text-xs text-gray-500">Format: name@space (e.g., alice@example)</p>
-            </div>
-
-            <div>
-                <label for="scriptPubkey" class="block text-sm font-medium text-gray-700 mb-1">Script Pubkey (optional)</label>
-                <input type="text" id="scriptPubkey" name="scriptPubkey" placeholder="5120... (hex)"
-                    class="block w-full rounded-sm border border-gray-200 bg-white shadow-inner focus:border-bitcoin-500 focus:ring-1 focus:ring-bitcoin-500 sm:text-sm px-3 py-2.5 mono">
-                <p class="mt-1.5 text-xs text-gray-500">Leave empty to generate a new keypair</p>
-            </div>
-
-            <div class="flex gap-3 pt-2">
-                <button type="submit" class="rounded-sm bg-bitcoin-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-bitcoin-600 transition-colors">
-                    Add Request
-                </button>
-                <button type="button" onclick="generateRequest()" class="rounded-sm bg-gray-100 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors">
-                    Generate & Download
-                </button>
-            </div>
-        </form>
+<div class="space-y-8 animate-fade-in">
+    <div>
+        <h1 class="text-2xl font-bold text-zinc-100 tracking-tight">Handle Requests</h1>
+        <p class="mt-1 text-sm text-zinc-500">Add handle registration requests individually or in bulk</p>
     </div>
 
-    <!-- Bulk add -->
-    <div class="bg-white rounded-sm shadow-sm p-6">
-        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">Bulk Add (JSON)</h2>
-        <form id="bulkAddForm" class="space-y-4">
-            <div>
-                <textarea id="bulkJson" rows="5" placeholder='[{"handle": "alice@example", "script_pubkey": "5120..."}]'
-                    class="block w-full rounded-sm border border-gray-200 bg-white shadow-inner focus:border-bitcoin-500 focus:ring-1 focus:ring-bitcoin-500 sm:text-sm px-3 py-2.5 mono"></textarea>
-            </div>
-            <button type="submit" class="rounded-sm bg-bitcoin-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-bitcoin-600 transition-colors">
-                Add All
-            </button>
-        </form>
+    <div class="card rounded-3xl overflow-hidden">
+        <div class="border-b divider px-6 py-4"><h2 class="text-sm font-semibold text-zinc-300">Add Request</h2></div>
+        <div class="p-6">
+            <form id="addRequestForm" class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="handle" class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">Handle</label>
+                        <input type="text" id="handle" placeholder="alice@example" class="block w-full rounded-xl input-field px-3.5 py-2.5 text-sm transition-all" required>
+                        <p class="mt-1.5 text-xs text-zinc-500">Format: name@space</p>
+                    </div>
+                    <div>
+                        <label for="scriptPubkey" class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">Script Pubkey <span class="text-zinc-600 normal-case">(optional)</span></label>
+                        <input type="text" id="scriptPubkey" placeholder="5120..." class="block w-full rounded-xl input-field px-3.5 py-2.5 text-sm font-mono transition-all">
+                    </div>
+                </div>
+                <div class="flex gap-3 pt-1">
+                    <button type="submit" class="btn-primary rounded-xl px-6 py-2.5 text-sm font-medium text-white transition-all duration-200">Add Request</button>
+                    <button type="button" onclick="generateRequest()" class="btn-secondary rounded-xl px-5 py-2.5 text-sm font-medium text-zinc-300 transition-all duration-200">Generate & Download</button>
+                </div>
+            </form>
+        </div>
     </div>
 
-    <!-- Results -->
-    <div id="results" class="hidden bg-white rounded-sm shadow-sm p-6">
-        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">Results</h2>
-        <pre id="resultsContent" class="text-sm text-gray-700 mono overflow-x-auto bg-stone-50 rounded-sm p-4"></pre>
+    <div class="card rounded-3xl overflow-hidden">
+        <div class="border-b divider px-6 py-4"><h2 class="text-sm font-semibold text-zinc-300">Bulk Add</h2></div>
+        <div class="p-6">
+            <form id="bulkAddForm" class="space-y-4">
+                <textarea id="bulkJson" rows="5" placeholder='[{"handle": "alice@example", "script_pubkey": "5120..."}]' class="block w-full rounded-xl input-field px-3.5 py-2.5 text-sm font-mono transition-all resize-none"></textarea>
+                <button type="submit" class="btn-primary rounded-xl px-6 py-2.5 text-sm font-medium text-white transition-all duration-200">Add All</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="results" class="hidden card rounded-3xl overflow-hidden animate-fade-in">
+        <div class="border-b divider px-6 py-4"><h2 class="text-sm font-semibold text-zinc-300">Results</h2></div>
+        <div class="p-6"><pre id="resultsContent" class="text-sm text-zinc-400 font-mono overflow-x-auto bg-surface-200 rounded-xl p-4 border border-zinc-700/50"></pre></div>
     </div>
 </div>
 {% endblock %}
-
 {% block scripts %}
 <script>
-document.getElementById('addRequestForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const handle = document.getElementById('handle').value;
-    const scriptPubkey = document.getElementById('scriptPubkey').value;
-
-    const requests = [{
-        handle: handle,
-        script_pubkey: scriptPubkey || undefined
-    }];
-
-    // If no script_pubkey, generate one first
-    if (!scriptPubkey) {
-        try {
-            const genResp = await fetch('/requests/generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ handle: handle })
-            });
-            if (!genResp.ok) {
-                const error = await genResp.text();
-                showResults({ error });
-                return;
-            }
-            const generated = await genResp.json();
-            requests[0] = generated.request;
-
-            if (generated.private_key) {
-                showResults({
-                    message: 'Request added with generated keypair',
-                    private_key: generated.private_key,
-                    warning: 'Save this private key! It will not be shown again.'
-                });
-            }
-        } catch (e) {
-            showResults({ error: e.message });
-            return;
-        }
-    }
-
-    await addRequests(requests);
-});
-
-document.getElementById('bulkAddForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const json = document.getElementById('bulkJson').value;
-    try {
-        const requests = JSON.parse(json);
-        await addRequests(requests);
-    } catch (e) {
-        showResults({ error: `Invalid JSON: ${e.message}` });
-    }
-});
-
-async function addRequests(requests) {
-    try {
-        const response = await fetch('/requests', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ requests })
-        });
-        const result = await response.json();
-        if (response.ok) {
-            showResults(result);
-        } else {
-            showResults({ error: result });
-        }
-    } catch (e) {
-        showResults({ error: e.message });
-    }
-}
-
-async function generateRequest() {
-    const handle = document.getElementById('handle').value;
-    if (!handle) {
-        alert('Please enter a handle');
-        return;
-    }
-
-    try {
-        const response = await fetch('/requests/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ handle })
-        });
-        const result = await response.json();
-
-        if (response.ok) {
-            // Download as JSON file
-            const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${handle.replace('@', '_')}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-
-            showResults({
-                message: 'Request generated and downloaded',
-                ...result
-            });
-        } else {
-            showResults({ error: result });
-        }
-    } catch (e) {
-        showResults({ error: e.message });
-    }
-}
-
-function showResults(data) {
-    const resultsDiv = document.getElementById('results');
-    const content = document.getElementById('resultsContent');
-    resultsDiv.classList.remove('hidden');
-    content.textContent = JSON.stringify(data, null, 2);
-}
+document.getElementById('addRequestForm').addEventListener('submit',async e=>{e.preventDefault();const h=document.getElementById('handle').value,s=document.getElementById('scriptPubkey').value,reqs=[{handle:h,script_pubkey:s||undefined}];if(!s){try{const g=await fetch('/requests/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({handle:h})});if(!g.ok){showResults(await g.json());return}const r=await g.json();reqs[0]=r.request;if(r.private_key)showResults({message:'Request added with generated keypair',private_key:r.private_key,warning:'Save this private key!'})}catch(e){showResults({error:e.message});return}}await addRequests(reqs)});
+document.getElementById('bulkAddForm').addEventListener('submit',async e=>{e.preventDefault();try{await addRequests(JSON.parse(document.getElementById('bulkJson').value))}catch(e){showResults({error:`Invalid JSON: ${e.message}`})}});
+async function addRequests(r){try{const res=await fetch('/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requests:r})});showResults(await res.json())}catch(e){showResults({error:e.message})}}
+async function generateRequest(){const h=document.getElementById('handle').value;if(!h){alert('Enter a handle');return}try{const r=await fetch('/requests/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({handle:h})}),j=await r.json();if(r.ok){const b=new Blob([JSON.stringify(j,null,2)],{type:'application/json'}),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=`${h.replace('@','_')}.json`;a.click();URL.revokeObjectURL(u);showResults({message:'Generated and downloaded',...j})}else showResults({error:j})}catch(e){showResults({error:e.message})}}
+function showResults(d){document.getElementById('results').classList.remove('hidden');document.getElementById('resultsContent').textContent=JSON.stringify(d,null,2)}
 </script>
 {% endblock %}

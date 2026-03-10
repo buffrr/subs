@@ -2,35 +2,42 @@
 //!
 //! Combines local space management with on-chain RPC operations.
 
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use anyhow::anyhow;
-use bitcoin::hashes::{sha256, Hash as BitcoinHash};
-use bitcoin::{FeeRate, ScriptBuf, Txid};
-use fabric::client::Fabric;
-use libveritas::cert::{Certificate, ChainProofRequestUtils, PtrsSubtree, SpacesSubtree};
-use libveritas::sname::{NameLike, SName};
-use libveritas::{ProvableOption, SovereigntyState, Zone};
-use libveritas::msg::{ChainProof, Message};
-use spaces_ptr::{ChainProofRequest, RootAnchor};
-use spacedb::{NodeHasher, Sha256Hasher};
-use spacedb::subtree::SubTree;
-use spaces_client::jsonrpsee::http_client::HttpClient;
-use spaces_client::rpc::{
-    CommitParams, RpcClient, RpcWalletRequest, RpcWalletTxBuilder,
-};
-use spaces_protocol::slabel::SLabel;
-use spaces_protocol::{Bytes, FullSpaceOut};
-use spaces_ptr::FullPtrOut;
-use spaces_ptr::sptr::Sptr;
 use crate::core::{
     CompressInput, LocalSpace, ProvingRequest, SkippedEntry, SpaceStatus, VerifyCertResult,
 };
 use crate::HandleRequest;
+use anyhow::anyhow;
+use bitcoin::hashes::{sha256, Hash as BitcoinHash};
+use bitcoin::{FeeRate, ScriptBuf, Txid};
+use fabric::client::Fabric;
+use libveritas::cert::{Certificate, ChainProofRequestUtils, PtrsSubtree, SpacesSubtree, Witness};
+use libveritas::msg::{ChainProof, Message};
+use libveritas::sname::{NameLike, SName};
+use libveritas::{ProvableOption, SovereigntyState, Zone};
+use spacedb::subtree::SubTree;
+use spacedb::{NodeHasher, Sha256Hasher};
+use spaces_client::jsonrpsee::http_client::HttpClient;
+use spaces_client::rpc::{CommitParams, RpcClient, RpcWalletRequest, RpcWalletTxBuilder};
+use spaces_protocol::slabel::SLabel;
+use spaces_protocol::{Bytes, FullSpaceOut};
+use spaces_ptr::sptr::Sptr;
+use spaces_ptr::FullPtrOut;
+use spaces_ptr::{ChainProofRequest, RootAnchor};
 
 pub struct Sha256;
+
+pub struct LiveSpaceInfo {
+    pub space: SLabel,
+    pub sptr: Sptr,
+    pub tip: Option<spaces_ptr::Commitment>,
+    pub fso: FullSpaceOut,
+    pub fdo: FullPtrOut,
+    pub local: Arc<LocalSpace>,
+}
 
 impl spaces_protocol::hasher::KeyHasher for Sha256 {
     fn hash(data: &[u8]) -> spaces_protocol::hasher::Hash {
@@ -104,6 +111,80 @@ pub struct PipelineStatus {
     pub current_step: Option<String>,
     /// Additional status message
     pub message: Option<String>,
+    /// Number of handles that need certificate publishing
+    pub unpublished: usize,
+}
+
+impl LiveSpaceInfo {
+    pub async fn issue_cert(
+        &self,
+        rpc: &HttpClient,
+        wallet: &str,
+        name: &SName,
+    ) -> anyhow::Result<Certificate> {
+        let label_count = name.label_count();
+        if label_count == 0 {
+            return Err(anyhow!("Cannot issue cert for empty name"));
+        }
+        let tip = self.tip.as_ref().map(|c| c.state_root);
+
+        if label_count == 1 {
+            let Some(tip) = tip else {
+                return Ok(Certificate::new(
+                    SName::from_space(&self.space).unwrap(),
+                    Witness::Root { receipt: None },
+                ));
+            };
+            return Ok(self
+                .local
+                .issue_cert(&SName::from_space(&self.space).unwrap(), tip)
+                .await?);
+        }
+        if label_count != 2 {
+            return Err(anyhow!("Cannot issue cert for more than two labels"));
+        }
+
+        let sub = name.subspace().unwrap();
+        let is_final = self.local.lookup_handle_in_tree(&sub, tip).await?.is_some();
+        if is_final {
+            return self.local.issue_cert(&name, tip.unwrap()).await;
+        }
+
+        // temp cert
+        let Some(script_pubkey) = self.local.get_handle_spk(&sub).await? else {
+            return Err(anyhow!("handle {} neither committed nor staged", name));
+        };
+        let zone = Zone {
+            anchor: 0,
+            sovereignty: SovereigntyState::Dependent,
+            handle: name.clone(),
+            script_pubkey,
+            data: None,
+            offchain_data: None,
+            delegate: ProvableOption::Unknown,
+            commitment: ProvableOption::Unknown,
+        };
+
+        let signature_bytes = rpc
+            .wallet_sign_schnorr(
+                wallet,
+                spaces_wallet::Subject::Ptr(self.sptr),
+                Bytes::new(zone.signing_bytes()),
+            )
+            .await
+            .map_err(|e| anyhow!("failed to sign zone: {}", e))?;
+
+        let sig_array: [u8; 64] = signature_bytes
+            .to_vec()
+            .try_into()
+            .map_err(|_| anyhow!("signature must be 64 bytes"))?;
+
+        let cert = self
+            .local
+            .issue_temp_cert(&zone.handle, tip, sig_array)
+            .await?;
+        Ok(cert)
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -215,7 +296,13 @@ impl Operator {
         let result = rpc
             .wallet_can_operate(&self.wallet, space.clone())
             .await
-            .map_err(|e| anyhow!("could not check if wallet can operate on '{}': {}", space, e))?;
+            .map_err(|e| {
+                anyhow!(
+                    "could not check if wallet can operate on '{}': {}",
+                    space,
+                    e
+                )
+            })?;
         Ok(result)
     }
 
@@ -391,9 +478,8 @@ impl Operator {
     pub async fn status(&self) -> anyhow::Result<crate::core::StatusResult> {
         self.load_all_spaces().await?;
 
-        let local_spaces: Vec<Arc<LocalSpace>> = {
-            self.spaces.lock().unwrap().values().cloned().collect()
-        };
+        let local_spaces: Vec<Arc<LocalSpace>> =
+            { self.spaces.lock().unwrap().values().cloned().collect() };
 
         let mut statuses = Vec::new();
         for local_space in local_spaces {
@@ -609,7 +695,9 @@ impl Operator {
         receipt_bytes: &[u8],
     ) -> anyhow::Result<()> {
         let local_space = self.get_local_space(space)?;
-        local_space.save_proving_receipt(request, receipt_bytes).await
+        local_space
+            .save_proving_receipt(request, receipt_bytes)
+            .await
     }
 
     /// Fulfill a proving request by commitment ID and type (for binary endpoint)
@@ -798,6 +886,7 @@ impl Operator {
 
         // No commitments yet - show message based on staged count
         let Some(commitment) = commitment else {
+            let unpublished = storage.list_unpublished(None).await?.len();
             let message = if staged_count > 0 {
                 Some(format!(
                     "{} handle(s) staged. Ready to commit.",
@@ -822,6 +911,7 @@ impl Operator {
                 },
                 current_step: None,
                 message,
+                unpublished,
             });
         };
 
@@ -841,7 +931,7 @@ impl Operator {
         };
 
         // For broadcast/confirmed/finalized/published, check on-chain state
-        let (broadcast, confirmed, finalized, published, current_step, message, is_done) =
+        let (broadcast, confirmed, finalized, published, current_step, message, is_done, confirmed_idx) =
             if !is_broadcast {
                 // Not broadcast yet
                 if is_initial || has_proof {
@@ -853,6 +943,7 @@ impl Operator {
                         Some("broadcast".to_string()),
                         Some("Ready to broadcast".to_string()),
                         false,
+                        None,
                     )
                 } else {
                     (
@@ -863,6 +954,7 @@ impl Operator {
                         Some("proving".to_string()),
                         Some("Proving required before broadcast".to_string()),
                         false,
+                        None,
                     )
                 }
             } else {
@@ -872,9 +964,7 @@ impl Operator {
                 if let Some(rpc) = &self.rpc {
                     let mut expected_root = [0u8; 32];
                     if hex::decode_to_slice(&commitment.root, &mut expected_root).is_ok() {
-                        if let Ok(Some(on_chain)) =
-                            rpc.get_commitment(space.clone(), None).await
-                        {
+                        if let Ok(Some(on_chain)) = rpc.get_commitment(space.clone(), None).await {
                             if on_chain.state_root == expected_root {
                                 if let Ok(info) = rpc.get_server_info().await {
                                     let confirmations =
@@ -899,6 +989,7 @@ impl Operator {
                                 None,
                                 Some("Certificates published".to_string()),
                                 true,
+                                Some(commitment.idx),
                             )
                         } else {
                             (
@@ -909,6 +1000,7 @@ impl Operator {
                                 Some("published".to_string()),
                                 Some("Ready to publish certificates".to_string()),
                                 false,
+                                Some(commitment.idx),
                             )
                         }
                     }
@@ -922,6 +1014,7 @@ impl Operator {
                             Some("finalized".to_string()),
                             Some(format!("{}/150 confirmations", conf)),
                             false,
+                            Some(commitment.idx),
                         )
                     }
                     None => {
@@ -934,6 +1027,7 @@ impl Operator {
                             Some("confirmed".to_string()),
                             Some("Waiting for confirmation".to_string()),
                             false,
+                            None,
                         )
                     }
                 }
@@ -941,6 +1035,8 @@ impl Operator {
 
         // has_pending is true until fully done (published)
         let has_pending = !is_done;
+
+        let unpublished = storage.list_unpublished(confirmed_idx).await?.len();
 
         Ok(PipelineStatus {
             has_pending,
@@ -958,6 +1054,7 @@ impl Operator {
             },
             current_step,
             message,
+            unpublished,
         })
     }
 
@@ -1003,10 +1100,16 @@ impl Operator {
         let msg = self.build_message(certs).await?;
         log::info!("submit_certs: message built, broadcasting via fabric");
         let fabric = self.require_fabric()?;
-        let relays = fabric.bootstrap().await.map_err(|e| anyhow!("fabric bootstrap error: {}", e))?;
+        let relays = fabric
+            .bootstrap()
+            .await
+            .map_err(|e| anyhow!("fabric bootstrap error: {}", e))?;
 
         log::info!("relays available: {:?}", relays);
-        fabric.broadcast(&msg.to_bytes()).await.map_err(|e| anyhow!("Could not broadcast message: {}", e))?;
+        fabric
+            .broadcast(&msg.to_bytes())
+            .await
+            .map_err(|e| anyhow!("Could not broadcast message: {}", e))?;
         log::info!("submit_certs: broadcast OK");
         Ok(())
     }
@@ -1022,11 +1125,9 @@ impl Operator {
         let res = rpc.build_chain_proof(req, None).await?;
         log::info!("build_message: chain proof received");
 
-        let stree =
-            SubTree::<Sha256Hasher>::from_slice(res.spaces_proof.as_slice())
+        let stree = SubTree::<Sha256Hasher>::from_slice(res.spaces_proof.as_slice())
             .map_err(|e| anyhow!("could not decode spaces proof: {}", e))?;
-        let ptree =
-            SubTree::<Sha256Hasher>::from_slice(res.ptrs_proof.as_slice())
+        let ptree = SubTree::<Sha256Hasher>::from_slice(res.ptrs_proof.as_slice())
             .map_err(|e| anyhow!("could not decode ptrs proof: {}", e))?;
 
         let chain_proof = ChainProof {
@@ -1054,14 +1155,35 @@ impl Operator {
         Ok((root_cert, handle_cert))
     }
 
+    pub async fn get_live_space(&self, space: SLabel) -> anyhow::Result<LiveSpaceInfo> {
+        let rpc = self.require_rpc()?;
+        let Some(fso) = rpc.get_space(&space.to_string()).await? else {
+            return Err(anyhow!("space not found: {}", space));
+        };
+        let tip = rpc
+            .get_commitment(space.clone(), None)
+            .await
+            .map_err(|e| anyhow!("could not retrieve commitment tip for {}: {}", space, e))?;
+        let sptr = Sptr::from_spk::<Sha256>(fso.spaceout.script_pubkey.clone());
+        let Some(fdo) = rpc.get_ptr(spaces_wallet::Subject::Ptr(sptr)).await? else {
+            return Err(anyhow!("no delegate {} found for space {}", sptr, space));
+        };
+        let local = self.get_local_space(&space)?;
+        Ok(LiveSpaceInfo {
+            space,
+            sptr,
+            tip,
+            fso,
+            fdo,
+            local,
+        })
+    }
+
     pub async fn issue_certs(&self, handles: Vec<SName>) -> anyhow::Result<Vec<Certificate>> {
         let mut certs = Vec::new();
-        struct SpaceData {
-            space: SLabel,
-            sptr: Sptr,
+        struct SpaceHandles {
+            info: LiveSpaceInfo,
             handles: Vec<SName>,
-            fso: FullSpaceOut,
-            fdo: FullPtrOut,
         }
 
         let mut by_space = HashMap::new();
@@ -1077,89 +1199,23 @@ impl Operator {
         let rpc = self.require_rpc()?;
         let mut space_datas = Vec::new();
         for (space, handles) in by_space {
-            log::info!("issue_certs: get_space({})", space);
-            let Some(fso) = rpc.get_space(&space.to_string()).await? else {
-                return Err(anyhow!("space not found: {}", space));
-            };
-            log::info!("issue_certs: get_space OK, computing sptr");
-            let sptr = Sptr::from_spk::<Sha256>(fso.spaceout.script_pubkey.clone());
-            log::info!("issue_certs: get_ptr({})", sptr);
-            let Some(fdo) = rpc.get_ptr(spaces_wallet::Subject::Ptr(sptr)).await? else {
-                return Err(anyhow!("no delegate {} found for space {}", sptr, space));
-            };
-            log::info!("issue_certs: get_ptr OK");
-            space_datas.push(SpaceData {
-                space,
-                sptr,
-                handles,
-                fso,
-                fdo,
-            })
+            let info = self.get_live_space(space.clone()).await?;
+            space_datas.push(SpaceHandles { info, handles })
         }
 
         for space_data in space_datas {
-            let local_space = self.get_local_space(&space_data.space)?;
-
-            log::info!("issue_certs: issuing root cert for {}", space_data.space);
-            let root_cert = local_space
-                .issue_cert(&SName::from_space(&space_data.space).unwrap())
+            let space = SName::from_space(&space_data.info.space).unwrap();
+            let root_cert = space_data
+                .info
+                .issue_cert(rpc, &self.wallet, &space)
                 .await?;
             certs.push(root_cert);
-            log::info!("issue_certs: root cert OK");
-
             for handle in space_data.handles {
-                let sub = handle.subspace().unwrap();
-                let is_final = local_space.lookup_handle(&sub).await?.is_some();
-                log::info!("issue_certs: handle {} is_final={}", handle, is_final);
-                if !is_final {
-                    let Some(script_pubkey) = local_space.get_staged(&sub).await? else {
-                        return Err(anyhow!(
-                            "handle {} neither committed nor staged",
-                            handle
-                        ));
-                    };
-                    log::info!("issue_certs: building zone for {}", handle);
-                    let zone = Zone {
-                        anchor: 0,
-                        sovereignty: SovereigntyState::Dependent,
-                        handle,
-                        script_pubkey: ScriptBuf::from_bytes(script_pubkey),
-                        data: None,
-                        offchain_data: None,
-                        delegate: ProvableOption::Unknown,
-                        commitment: ProvableOption::Unknown,
-                    };
-
-                    log::info!("issue_certs: wallet_sign_schnorr for {}", zone.handle);
-                    let signature_bytes = rpc
-                        .wallet_sign_schnorr(
-                            &self.wallet,
-                            spaces_wallet::Subject::Ptr(space_data.sptr),
-                            Bytes::new(zone.signing_bytes()),
-                        )
-                        .await
-                        .map_err(|e| anyhow!("failed to sign zone: {}", e))?;
-                    log::info!("issue_certs: signature OK");
-
-                    let sig_array: [u8; 64] = signature_bytes
-                        .to_vec()
-                        .try_into()
-                        .map_err(|_| anyhow!("signature must be 64 bytes"))?;
-
-                    log::info!("issue_certs: issuing temp cert for {}", zone.handle);
-                    let cert = local_space
-                        .issue_temp_cert(&zone.handle, sig_array)
-                        .await?;
-                    certs.push(cert);
-                    log::info!("issue_certs: temp cert OK");
-                    continue;
-                }
-
-                // final cert
-                log::info!("issue_certs: issuing final cert for {}", handle);
-                let cert = local_space.issue_cert(&handle).await?;
+                let cert = space_data
+                    .info
+                    .issue_cert(rpc, &self.wallet, &handle)
+                    .await?;
                 certs.push(cert);
-                log::info!("issue_certs: final cert OK");
             }
         }
 
@@ -1170,17 +1226,27 @@ impl Operator {
     // Certificate Publishing
     // =========================================================================
 
-    /// Publish temp certificates for unpublished staged handles.
+    /// Publish certificates for all unpublished handles.
     ///
-    /// Issues temp certs for all staged handles that haven't been published yet
-    /// and broadcasts them via fabric. Returns the number of handles published.
-    pub async fn publish_staged_certs(&self, space: &SLabel) -> anyhow::Result<usize> {
+    /// Issues the appropriate cert type (temp or final) for each handle based on
+    /// on-chain tip state and broadcasts them via fabric. Returns the number of handles published.
+    pub async fn publish_certs(&self, space: &SLabel) -> anyhow::Result<usize> {
         self.require_fabric()?;
 
         let local_space = self.get_local_space(space)?;
         let storage = local_space.storage();
 
-        let unpublished = storage.list_unpublished_staged().await?;
+        let live = self.get_live_space(space.clone()).await?;
+        let tip = live.tip.as_ref().map(|c| c.state_root);
+
+        // Determine confirmed commitment idx from on-chain tip
+        let confirmed_idx = if let Some(tip) = tip {
+            storage.get_commitment_by_root(&hex::encode(tip)).await?.map(|c| c.idx)
+        } else {
+            None
+        };
+
+        let unpublished = storage.list_unpublished(confirmed_idx).await?;
         if unpublished.is_empty() {
             return Ok(0);
         }
@@ -1191,63 +1257,40 @@ impl Operator {
             .collect::<Result<_, _>>()
             .map_err(|e| anyhow!("invalid handle name: {}", e))?;
 
-        let names: Vec<String> = unpublished.iter().map(|h| h.name.clone()).collect();
-        let count = names.len();
-
+        let count = handle_names.len();
         let certs = self.issue_certs(handle_names).await?;
         self.submit_certs(certs).await?;
 
-        storage.mark_handles_published(&names, "temp").await?;
-        Ok(count)
-    }
-
-    /// Publish final certificates for a finalized commitment.
-    ///
-    /// Issues final certs for all committed handles that haven't been published
-    /// as final yet and broadcasts them via fabric. Returns the number of handles published.
-    pub async fn publish_final_certs(&self, space: &SLabel) -> anyhow::Result<usize> {
-        self.require_fabric()?;
-
-        let local_space = self.get_local_space(space)?;
-        let storage = local_space.storage();
-
-        // Verify the commitment is finalized
-        let commitment = storage
-            .get_last_commitment()
-            .await?
-            .ok_or_else(|| anyhow!("no commitments found"))?;
-
-        if commitment.published_at.is_some() {
-            return Err(anyhow!("commitment already published"));
+        // Determine temp vs final per handle based on confirmed idx
+        let mut temp_names = Vec::new();
+        let mut final_names = Vec::new();
+        for h in &unpublished {
+            let is_final = match (h.commitment_idx, confirmed_idx) {
+                (Some(h_idx), Some(c_idx)) if h_idx <= c_idx => true,
+                _ => false,
+            };
+            if is_final {
+                final_names.push(h.name.clone());
+            } else {
+                temp_names.push(h.name.clone());
+            }
         }
 
-        let commit_status = self.get_commit_status(space).await?;
-        match commit_status {
-            CommitStatus::Finalized { .. } => {}
-            _ => return Err(anyhow!("commitment not yet finalized")),
+        if !temp_names.is_empty() {
+            storage.mark_handles_published(&temp_names, "temp").await?;
+        }
+        if !final_names.is_empty() {
+            storage.mark_handles_published(&final_names, "final").await?;
+            // If no more committed handles need publishing, mark commitment as published
+            if storage.list_unpublished(confirmed_idx).await?.iter().all(|h| h.commitment_root.is_none()) {
+                if let Some(commitment) = storage.get_last_commitment().await? {
+                    if commitment.published_at.is_none() {
+                        storage.mark_commitment_published(commitment.id).await?;
+                    }
+                }
+            }
         }
 
-        let unpublished = storage.list_unpublished_committed().await?;
-        if unpublished.is_empty() {
-            // No handles to publish but mark commitment as published
-            storage.mark_commitment_published(commitment.id).await?;
-            return Ok(0);
-        }
-
-        let handle_names: Vec<SName> = unpublished
-            .iter()
-            .map(|h| format!("{}@{}", h.name, space.as_str_unprefixed().unwrap()).parse())
-            .collect::<Result<_, _>>()
-            .map_err(|e| anyhow!("invalid handle name: {}", e))?;
-
-        let names: Vec<String> = unpublished.iter().map(|h| h.name.clone()).collect();
-        let count = names.len();
-
-        let certs = self.issue_certs(handle_names).await?;
-        self.submit_certs(certs).await?;
-
-        storage.mark_handles_published(&names, "final").await?;
-        storage.mark_commitment_published(commitment.id).await?;
         Ok(count)
     }
 
@@ -1278,7 +1321,8 @@ pub fn verify_certificate_with_anchors(
     _root_cert: Option<Certificate>,
     anchors: Vec<RootAnchor>,
 ) -> anyhow::Result<VerifyCertResult> {
-    let _veritas = libveritas::Veritas::new().with_anchors(anchors)
+    let _veritas = libveritas::Veritas::new()
+        .with_anchors(anchors)
         .map_err(|e| anyhow!("invalid anchors: {}", e))?;
     todo!("verify certificate")
 }

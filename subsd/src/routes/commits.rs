@@ -197,7 +197,7 @@ pub struct PublishResponse {
     pub handles_published: usize,
 }
 
-/// POST /spaces/:space/publish - Publish final certs for finalized commitment
+/// POST /spaces/:space/publish - Publish certificates for all unpublished handles
 pub async fn publish_certs(
     State(state): State<AppState>,
     Path(space): Path<String>,
@@ -208,27 +208,7 @@ pub async fn publish_certs(
 
     let count = state
         .operator
-        .publish_final_certs(&space)
-        .await
-        .map_err(|e| json_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    Ok(Json(PublishResponse {
-        handles_published: count,
-    }))
-}
-
-/// POST /spaces/:space/publish/staged - Publish temp certs for staged handles
-pub async fn publish_staged(
-    State(state): State<AppState>,
-    Path(space): Path<String>,
-) -> Result<Json<PublishResponse>, Response> {
-    let space = space
-        .parse()
-        .map_err(|e| json_error(StatusCode::BAD_REQUEST, format!("invalid space: {}", e)))?;
-
-    let count = state
-        .operator
-        .publish_staged_certs(&space)
+        .publish_certs(&space)
         .await
         .map_err(|e| json_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
 

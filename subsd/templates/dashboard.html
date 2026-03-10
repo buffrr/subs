@@ -1,70 +1,64 @@
 {% extends "base.html" %}
-
 {% block title %}Dashboard - subsd{% endblock %}
-
-{% block nav_dashboard %}text-bitcoin-600 font-semibold{% endblock %}
+{% block nav_dashboard_cls %}text-zinc-100 nav-active{% endblock %}
+{% block nav_dashboard_icon %}text-accent-500{% endblock %}
 
 {% block content %}
-<div class="space-y-6">
-    <!-- Header -->
+<div class="space-y-8 animate-fade-in">
     <div class="flex items-center justify-between">
-        <h1 class="text-xl font-semibold text-gray-900">Spaces</h1>
-        <button onclick="location.reload()" class="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 transition-colors">
-            <svg class="mr-1.5 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-            </svg>
+        <div>
+            <h1 class="text-2xl font-bold text-zinc-100 tracking-tight">Dashboard</h1>
+            <p class="mt-1 text-sm text-zinc-500">Manage your operated spaces</p>
+        </div>
+        <button onclick="location.reload()" class="btn-secondary rounded-xl px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-all duration-200 flex items-center gap-1.5">
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg>
             Refresh
         </button>
     </div>
 
     {% if spaces.is_empty() %}
-    <!-- Empty state -->
-    <div class="text-center py-12 bg-white rounded-sm shadow-sm">
-        <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
-        </svg>
-        <h3 class="mt-3 text-sm font-medium text-gray-900">No spaces yet</h3>
-        <p class="mt-1 text-sm text-gray-500">Get started by operating a space.</p>
-        <div class="mt-6">
-            <a href="/ui/operate" class="inline-flex items-center rounded-sm bg-bitcoin-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-bitcoin-600 transition-colors">
-                Operate Space
-            </a>
+    <div class="card rounded-3xl flex flex-col items-center justify-center py-20">
+        <div class="flex h-16 w-16 items-center justify-center rounded-2xl bg-surface-200">
+            <svg class="h-8 w-8 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+            </svg>
         </div>
+        <h3 class="mt-4 text-sm font-semibold text-zinc-300">No spaces yet</h3>
+        <p class="mt-1 text-sm text-zinc-500">Get started by operating a space.</p>
+        <a href="/ui/operate" class="mt-6 btn-primary rounded-xl px-6 py-2.5 text-sm font-medium text-white transition-all duration-200 flex items-center gap-2">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            Operate Space
+        </a>
     </div>
     {% else %}
-    <!-- Spaces grid -->
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {% for space in spaces %}
-        <a href="/ui/spaces/{{ space.space }}" class="block bg-white rounded-sm shadow-sm p-5 hover:shadow transition-shadow">
-            <div class="flex items-center justify-between">
-                <h3 class="text-base font-medium text-gray-900 mono">{{ space.space }}</h3>
+        <a href="/ui/spaces/{{ space.space }}" class="group card rounded-2xl p-5 hover:bg-surface-200 transition-all duration-300 hover:border-zinc-600 hover:-translate-y-0.5">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2.5">
+                    <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-500/10 group-hover:bg-orange-500/15 transition-colors">
+                        <svg class="h-4 w-4 text-accent-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"/>
+                        </svg>
+                    </div>
+                    <h3 class="text-[15px] font-bold text-zinc-100 font-mono">{{ space.space }}</h3>
+                </div>
                 {% if space.has_groth16 %}
-                <span class="inline-flex items-center rounded-sm bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">SNARK</span>
+                <span class="badge rounded-lg px-2 py-0.5 text-[11px] font-semibold text-emerald-400">SNARK</span>
                 {% else if space.has_receipt %}
-                <span class="inline-flex items-center rounded-sm bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">STARK</span>
+                <span class="badge rounded-lg px-2 py-0.5 text-[11px] font-semibold text-blue-400">STARK</span>
                 {% endif %}
             </div>
-
-            <dl class="mt-3 flex gap-6 text-sm">
-                <div>
-                    <dt class="text-gray-500">Handles</dt>
-                    <dd class="font-medium text-gray-900">{{ space.total_handles }}</dd>
-                </div>
-                <div>
-                    <dt class="text-gray-500">Committed</dt>
-                    <dd class="font-medium text-green-600">{{ space.committed_handles }}</dd>
-                </div>
-                <div>
-                    <dt class="text-gray-500">Staged</dt>
-                    <dd class="font-medium {% if space.staged_handles > 0 %}text-orange-500{% else %}text-gray-400{% endif %}">{{ space.staged_handles }}</dd>
-                </div>
-            </dl>
+            <div class="flex items-center gap-5 text-sm">
+                <div><span class="text-zinc-500 text-xs">Handles</span><p class="font-bold text-zinc-200 tabular-nums">{{ space.total_handles }}</p></div>
+                <div class="h-8 w-px bg-zinc-700/50"></div>
+                <div><span class="text-zinc-500 text-xs">Committed</span><p class="font-bold text-emerald-400 tabular-nums">{{ space.committed_handles }}</p></div>
+                <div class="h-8 w-px bg-zinc-700/50"></div>
+                <div><span class="text-zinc-500 text-xs">Staged</span><p class="font-bold tabular-nums {% if space.staged_handles > 0 %}text-amber-400{% else %}text-zinc-600{% endif %}">{{ space.staged_handles }}</p></div>
+            </div>
         </a>
         {% endfor %}
     </div>
     {% endif %}
-
 </div>
 {% endblock %}
-
-{% block scripts %}{% endblock %}

@@ -12,18 +12,18 @@ use std::{fs, io};
 use anyhow::anyhow;
 use bitcoin::ScriptBuf;
 use libveritas::cert::{Certificate, HandleSubtree, Signature, Witness};
-use libveritas::sname::{Label, NameLike, SName};
-use serde::Serialize;
 use libveritas::constants::{FOLD_ID, STEP_ID};
+use libveritas::sname::{Label, NameLike, SName};
 use libveritas_zk::guest::Commitment as ZkCommitment;
 use libveritas_zk::BatchReader;
 use risc0_zkvm::Receipt;
-pub use subs_types::{CompressInput, ProvingRequest};
+use serde::Serialize;
 use spacedb::db::Database;
 use spacedb::subtree::SubTree;
-use spacedb::tx::ProofType;
+use spacedb::tx::{ProofType, ReadTransaction};
 use spacedb::{Hash, NodeHasher, Sha256Hasher};
 use spaces_protocol::slabel::SLabel;
+pub use subs_types::{CompressInput, ProvingRequest};
 use tokio::task::spawn_blocking;
 
 use crate::storage::Storage;
@@ -172,7 +172,6 @@ pub struct VerifyCertResult {
     pub leaf_zone: Option<libveritas::Zone>,
 }
 
-
 /// A local space with cached database connections.
 ///
 /// Holds the storage (SQLite) and SpaceDB connections for a single space.
@@ -222,9 +221,9 @@ impl LocalSpace {
     fn get_handle_proof_sync(
         db: &Database<Sha256Hasher>,
         handle: &SName,
+        tip: [u8;32]
     ) -> anyhow::Result<LocalHandleProof> {
-        let mut snap = db.begin_read()?;
-
+       let mut snap = get_snapshot_for_tip(db, tip)?;
         let subspace = handle
             .subspace()
             .ok_or_else(|| anyhow!("handle must have subspace"))?;
@@ -314,7 +313,9 @@ impl LocalSpace {
             }));
         }
 
-        self.storage.add_handle(&handle_name, &script_pubkey).await?;
+        self.storage
+            .add_handle(&handle_name, &script_pubkey)
+            .await?;
         Ok(None)
     }
 
@@ -407,7 +408,7 @@ impl LocalSpace {
                 let prev_hex = hex::encode(&c.initial_root);
                 let root_hex = hex::encode(&c.final_root);
 
-                self.storage
+                let (_, idx) = self.storage
                     .add_commitment(
                         Some(&prev_hex),
                         &root_hex,
@@ -432,7 +433,7 @@ impl LocalSpace {
                 })
                 .await??;
 
-                self.storage.commit_staged_handles(&root_hex).await?;
+                self.storage.commit_staged_handles(&root_hex, idx).await?;
 
                 Ok(SpaceCommitResult {
                     space: name,
@@ -466,19 +467,15 @@ impl LocalSpace {
                         )?;
                     }
                     tx.commit()?;
-                    let root = db
-                        .begin_read()
-                        .expect("read")
-                        .compute_root()
-                        .expect("root");
+                    let root = db.begin_read().expect("read").compute_root().expect("root");
                     Ok::<_, anyhow::Error>(hex::encode(root))
                 })
                 .await??;
 
-                self.storage
+                let (_, idx) = self.storage
                     .add_commitment(None, &end_root, &zk_batch, None)
                     .await?;
-                self.storage.commit_staged_handles(&end_root).await?;
+                self.storage.commit_staged_handles(&end_root, idx).await?;
 
                 Ok(SpaceCommitResult {
                     space: name,
@@ -492,12 +489,16 @@ impl LocalSpace {
     }
 
     /// Look up a handle in SpaceDB
-    pub async fn lookup_handle(&self, sub_label: &Label) -> anyhow::Result<Option<Vec<u8>>> {
+    pub async fn lookup_handle_in_tree(&self, sub_label: &Label, tip: Option<[u8;32]>) -> anyhow::Result<Option<Vec<u8>>> {
+        let tip = match tip {
+            None => return Ok(None),
+            Some(t) => t,
+        };
         let db = self.db.clone();
         let sub_label = sub_label.clone();
         spawn_blocking(move || {
             let db = db.lock().unwrap();
-            let mut snap = db.begin_read()?;
+            let mut snap = get_snapshot_for_tip(&db, tip)?;
             let key = Sha256Hasher::hash(sub_label.as_slabel().as_ref());
             Ok(snap.get(&key)?)
         })
@@ -519,6 +520,11 @@ impl LocalSpace {
     pub async fn get_staged(&self, sub_label: &Label) -> anyhow::Result<Option<Vec<u8>>> {
         let handle_name = sub_label.to_string();
         self.storage.is_staged(&handle_name).await
+    }
+
+    pub async fn get_handle_spk(&self, sub_label: &Label) -> anyhow::Result<Option<ScriptBuf>> {
+        let handle_name = sub_label.to_string();
+        self.storage.get_handle_spk(&handle_name).await
     }
 
     /// Load a receipt and extract commitment info
@@ -562,65 +568,59 @@ impl LocalSpace {
     /// Get local proof data for building a space/root certificate.
     ///
     /// If `prefer_compressed` is true, returns groth16 receipt if available.
-    pub async fn get_receipt(&self, prefer_compressed: bool) -> anyhow::Result<SpaceReceipt> {
-        let commitment_count = self.storage.commitment_count().await?;
+    pub async fn get_receipt(
+        &self,
+        tip: Option<[u8; 32]>,
+        prefer_compressed: bool,
+    ) -> anyhow::Result<SpaceReceipt> {
+        let tip = match tip {
+            None => {
+                return Ok(SpaceReceipt {
+                    receipt: None,
+                    commitment_root: None,
+                })
+            }
+            Some(t) => t,
+        };
 
-        if commitment_count > 1 {
-            let receipt_id = if prefer_compressed {
-                self.storage.get_tip_groth16_id().await?
-            } else {
-                self.storage.get_tip_receipt_id().await?
-            };
+        let tip_hex = hex::encode(tip);
+        let commitment = self.storage.get_commitment_by_root(&tip_hex).await?
+            .ok_or_else(|| anyhow!("No commitment found for tip {}", tip_hex))?;
 
-            let receipt_id = match receipt_id {
-                Some(id) => id,
-                None => {
-                    let last_commitment = self
-                        .storage
-                        .get_last_commitment()
-                        .await?
-                        .ok_or_else(|| anyhow!("No commitments found"))?;
-                    last_commitment
-                        .step_receipt_id
-                        .ok_or_else(|| anyhow!("No receipt found - run prove first"))?
-                }
-            };
-
-            let (receipt, commitment_info) =
-                self.load_receipt_and_commitment(receipt_id).await?;
-
-            Ok(SpaceReceipt {
-                receipt: Some(receipt),
-                commitment_root: Some(commitment_info.final_root),
-            })
-        } else if commitment_count == 1 {
-            let commitment = self
-                .storage
-                .get_commitment(0)
-                .await?
-                .ok_or_else(|| anyhow!("Commitment 0 not found"))?;
-            let mut root = [0; 32];
-            hex::decode_to_slice(&commitment.root, &mut root)
-                .map_err(|e| anyhow!("invalid root: {}", e))?;
-            Ok(SpaceReceipt {
+        if commitment.idx == 0 {
+            return Ok(SpaceReceipt {
                 receipt: None,
-                commitment_root: Some(root),
-            })
-        } else {
-            Ok(SpaceReceipt {
-                receipt: None,
-                commitment_root: None,
-            })
+                commitment_root: Some(tip),
+            });
         }
+
+        let receipt_id = if prefer_compressed {
+            commitment.aggregate_groth16_id
+                .or(commitment.aggregate_receipt_id)
+                .or(commitment.step_receipt_id)
+        } else {
+            commitment.aggregate_receipt_id
+                .or(commitment.step_receipt_id)
+        };
+
+        let receipt_id = receipt_id
+            .ok_or_else(|| anyhow!("No receipt for commitment #{}", commitment.idx))?;
+
+        let (receipt, _) = self.load_receipt_and_commitment(receipt_id).await?;
+
+        Ok(SpaceReceipt {
+            receipt: Some(receipt),
+            commitment_root: Some(tip),
+        })
     }
 
     /// Get local proof data for building a handle/leaf certificate
-    pub async fn get_handle_proof(&self, handle: &SName) -> anyhow::Result<LocalHandleProof> {
+    pub async fn get_handle_proof(&self, handle: &SName, tip: [u8;32]) -> anyhow::Result<LocalHandleProof> {
         let db = self.db.clone();
         let handle = handle.clone();
         spawn_blocking(move || {
             let db = db.lock().unwrap();
-            Self::get_handle_proof_sync(&db, &handle)
+            Self::get_handle_proof_sync(&db, &handle, tip)
         })
         .await?
     }
@@ -630,16 +630,20 @@ impl LocalSpace {
     // =========================================================================
 
     /// Issue a certificate for a subject.
-    pub async fn issue_cert(&self, subject: &SName) -> anyhow::Result<Certificate> {
+    pub async fn issue_cert(
+        &self,
+        subject: &SName,
+        tip: [u8; 32],
+    ) -> anyhow::Result<Certificate> {
         if subject.is_single_label() {
             return Ok(Certificate::new(
                 subject.clone(),
                 Witness::Root {
-                    receipt: self.get_receipt(true).await?.receipt,
+                    receipt: self.get_receipt(Some(tip), true).await?.receipt,
                 },
             ));
         }
-        let proof = self.get_handle_proof(subject).await?;
+        let proof = self.get_handle_proof(subject, tip).await?;
         Ok(Certificate::new(
             subject.clone(),
             Witness::Leaf {
@@ -657,6 +661,7 @@ impl LocalSpace {
     pub async fn issue_temp_cert(
         &self,
         handle: &SName,
+        tip: Option<[u8; 32]>,
         signature: [u8; 64],
     ) -> anyhow::Result<Certificate> {
         let subspace = handle
@@ -666,16 +671,16 @@ impl LocalSpace {
 
         let script_pubkey = self
             .storage
-            .is_staged(&handle_name)
+            .get_handle_spk(&handle_name)
             .await?
             .ok_or_else(|| anyhow!("handle '{}' is not staged", handle))?;
 
-        let exclusion = if self.storage.commitment_count().await? > 0 {
+        let exclusion = if let Some(tip) = tip {
             let db = self.db.clone();
             let subspace = subspace.clone();
             spawn_blocking(move || {
                 let db = db.lock().unwrap();
-                let mut snap = db.begin_read()?;
+                let mut snap = get_snapshot_for_tip(&db, tip)?;
                 let key = Sha256Hasher::hash(subspace.as_slabel().as_ref());
                 let exclusion_proof = snap
                     .prove(&[key], ProofType::Standard)
@@ -690,7 +695,7 @@ impl LocalSpace {
         Ok(Certificate::new(
             handle.clone(),
             Witness::Leaf {
-                genesis_spk: ScriptBuf::from_bytes(script_pubkey),
+                genesis_spk: script_pubkey,
                 handles: exclusion,
                 signature: Some(Signature(signature)),
             },
@@ -719,9 +724,7 @@ impl LocalSpace {
             let exclusion_proof = commitment
                 .exclusion_merkle_proof
                 .as_ref()
-                .ok_or_else(|| {
-                    anyhow!("[#{}] missing exclusion_merkle_proof", commitment.idx)
-                })?;
+                .ok_or_else(|| anyhow!("[#{}] missing exclusion_merkle_proof", commitment.idx))?;
 
             return Ok(Some(ProvingRequest::Step {
                 commitment_id: commitment.id,
@@ -1032,7 +1035,7 @@ mod tests {
         assert_eq!(is_staged.unwrap(), spk.as_bytes());
 
         // Commit staged handles
-        let committed_count = storage.commit_staged_handles("abc123").await.unwrap();
+        let committed_count = storage.commit_staged_handles("abc123", 0).await.unwrap();
         assert_eq!(committed_count, 1);
         assert_eq!(storage.staged_count().await.unwrap(), 0);
 
@@ -1099,7 +1102,8 @@ mod tests {
 
         // Verify in SpaceDB
         let label = test_label("alice");
-        let stored = local_space.lookup_handle(&label).await.unwrap();
+        let tip = local_space.get_tree_root().await.unwrap();
+        let stored = local_space.lookup_handle_in_tree(&label, Some(tip)).await.unwrap();
         assert!(stored.is_some());
         assert_eq!(stored.unwrap(), vec![0x01; 25]);
     }
@@ -1124,12 +1128,12 @@ mod tests {
 
         // Both should exist
         assert!(local_space
-            .lookup_handle(&test_label("alice"))
+            .lookup_handle_in_tree(&test_label("alice"), Some(local_space.get_tree_root().await.unwrap()))
             .await
             .unwrap()
             .is_some());
         assert!(local_space
-            .lookup_handle(&test_label("bob"))
+            .lookup_handle_in_tree(&test_label("bob"), Some(local_space.get_tree_root().await.unwrap()))
             .await
             .unwrap()
             .is_some());
@@ -1146,10 +1150,7 @@ mod tests {
         // Adding same request again should skip
         let skipped = local_space.add_request(&req).await.unwrap();
         assert!(skipped.is_some());
-        assert!(matches!(
-            skipped.unwrap().reason,
-            SkipReason::AlreadyStaged
-        ));
+        assert!(matches!(skipped.unwrap().reason, SkipReason::AlreadyStaged));
     }
 
     #[tokio::test]
@@ -1213,25 +1214,27 @@ mod tests {
         local_space2.commit(false).await.unwrap();
 
         // alice only in space1
+        let tip1 = Some(local_space1.get_tree_root().await.unwrap());
+        let tip2 = Some(local_space2.get_tree_root().await.unwrap());
         assert!(local_space1
-            .lookup_handle(&test_label("alice"))
+            .lookup_handle_in_tree(&test_label("alice"), tip1)
             .await
             .unwrap()
             .is_some());
         assert!(local_space2
-            .lookup_handle(&test_label("alice"))
+            .lookup_handle_in_tree(&test_label("alice"), tip2)
             .await
             .unwrap()
             .is_none());
 
         // bob only in space2
         assert!(local_space1
-            .lookup_handle(&test_label("bob"))
+            .lookup_handle_in_tree(&test_label("bob"), tip1)
             .await
             .unwrap()
             .is_none());
         assert!(local_space2
-            .lookup_handle(&test_label("bob"))
+            .lookup_handle_in_tree(&test_label("bob"), tip2)
             .await
             .unwrap()
             .is_some());
@@ -1283,4 +1286,17 @@ mod tests {
         assert_ne!(commitment.final_root, [0u8; 32]);
         assert_ne!(commitment.initial_root, commitment.final_root);
     }
+}
+
+
+fn get_snapshot_for_tip(db: &Database<Sha256Hasher>, tip: [u8;32]) -> anyhow::Result<ReadTransaction<Sha256Hasher>> {
+    for snapshot in db.iter() {
+        let mut snap = snapshot?;
+        let root = snap.compute_root()
+            .map_err(|e| anyhow!("could not compute root for snapshot"))?;
+        if root == tip {
+            return Ok(snap);
+        }
+    }
+    Err(anyhow!("no snapshot for {}", hex::encode(&tip)))
 }

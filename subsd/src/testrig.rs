@@ -62,6 +62,22 @@ impl TestRigHandle {
         &self.rig
     }
 
+    /// Gracefully stop bitcoind so it flushes all data to disk.
+    /// Must be called before dropping, otherwise bitcoind gets SIGKILL
+    /// and may lose recent blocks.
+    pub async fn stop(&self) -> Result<()> {
+        use spaces_testutil::bitcoind::bitcoincore_rpc::RpcApi;
+        tracing::info!("Stopping bitcoind gracefully...");
+        let c = self.rig.bitcoind.clone();
+        tokio::task::spawn_blocking(move || {
+            let _ = c.client.stop();
+        })
+        .await
+        .map_err(|e| anyhow!("join error: {}", e))?;
+        tracing::info!("bitcoind stopped cleanly");
+        Ok(())
+    }
+
     /// Mine blocks (useful for testing).
     pub async fn mine_blocks(&self, count: usize) -> Result<()> {
         self.rig.mine_blocks(count, None).await

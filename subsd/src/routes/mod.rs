@@ -46,7 +46,6 @@ pub fn router() -> Router<AppState> {
         .route("/spaces/:space/commit/status", get(commits::get_commit_status))
         .route("/spaces/:space/pipeline", get(commits::get_pipeline_status))
         .route("/spaces/:space/publish", post(commits::publish_certs))
-        .route("/spaces/:space/publish/staged", post(commits::publish_staged))
         // API: Proving
         .route("/spaces/:space/proving/next", get(proving::get_next))
         .route("/spaces/:space/proving/fulfill", post(proving::fulfill))

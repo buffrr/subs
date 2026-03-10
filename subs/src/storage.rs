@@ -2,6 +2,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
+use bitcoin::ScriptBuf;
+use clap::builder::TypedValueParser;
 use rusqlite::{params, Connection, OptionalExtension};
 use spaces_protocol::slabel::SLabel;
 use tokio::task::spawn_blocking;
@@ -39,6 +41,7 @@ CREATE TABLE IF NOT EXISTS handles (
     name TEXT NOT NULL UNIQUE,
     script_pubkey BLOB NOT NULL,
     commitment_root TEXT,  -- NULL if staged, set to root hex when committed
+    commitment_idx INTEGER, -- NULL if staged, set to commitment idx when committed
     publish_status TEXT    -- NULL = not published, 'temp' = temp cert, 'final' = final cert
 );
 
@@ -69,6 +72,8 @@ pub struct Handle {
     pub script_pubkey: Vec<u8>,
     /// NULL if staged, set to commitment root hex when committed
     pub commitment_root: Option<String>,
+    /// NULL if staged, set to commitment idx when committed
+    pub commitment_idx: Option<usize>,
     /// NULL = not published, "temp" = temp cert published, "final" = final cert published
     pub publish_status: Option<String>,
 }
@@ -265,6 +270,40 @@ impl Storage {
         .await?
     }
 
+    pub async fn get_commitment_by_root(&self, root: &str) -> anyhow::Result<Option<Commitment>> {
+        let conn = self.conn.clone();
+        let root = root.to_string();
+        spawn_blocking(move || {
+            let conn = conn.lock().unwrap();
+            let commitment = conn
+                .query_row(
+                    "SELECT id, idx, prev_root, root, zk_batch, exclusion_merkle_proof,
+                            step_receipt_id, aggregate_receipt_id, aggregate_groth16_id,
+                            commit_txid, published_at
+                     FROM commitments WHERE root = ?",
+                    params![root],
+                    |row| {
+                        Ok(Commitment {
+                            id: row.get(0)?,
+                            idx: row.get::<_, i64>(1)? as usize,
+                            prev_root: row.get(2)?,
+                            root: row.get(3)?,
+                            zk_batch: row.get(4)?,
+                            exclusion_merkle_proof: row.get(5)?,
+                            step_receipt_id: row.get(6)?,
+                            aggregate_receipt_id: row.get(7)?,
+                            aggregate_groth16_id: row.get(8)?,
+                            commit_txid: row.get(9)?,
+                            published_at: row.get(10)?,
+                        })
+                    },
+                )
+                .optional()?;
+            Ok(commitment)
+        })
+        .await?
+    }
+
     pub async fn list_commitments(&self) -> anyhow::Result<Vec<Commitment>> {
         let conn = self.conn.clone();
         spawn_blocking(move || {
@@ -297,13 +336,14 @@ impl Storage {
         .await?
     }
 
+    /// Returns (row_id, idx) where idx is the 0-based commitment index
     pub async fn add_commitment(
         &self,
         prev_root: Option<&str>,
         root: &str,
         zk_batch: &[u8],
         exclusion_merkle_proof: Option<&[u8]>,
-    ) -> anyhow::Result<i64> {
+    ) -> anyhow::Result<(i64, usize)> {
         let conn = self.conn.clone();
         let prev_root = prev_root.map(|s| s.to_string());
         let root = root.to_string();
@@ -324,7 +364,7 @@ impl Storage {
                     exclusion_merkle_proof
                 ],
             )?;
-            Ok(conn.last_insert_rowid())
+            Ok((conn.last_insert_rowid(), count as usize))
         })
         .await?
     }
@@ -423,7 +463,7 @@ impl Storage {
             let conn = conn.lock().unwrap();
             let handle = conn
                 .query_row(
-                    "SELECT id, name, script_pubkey, commitment_root, publish_status FROM handles WHERE name = ?",
+                    "SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status FROM handles WHERE name = ?",
                     params![name],
                     |row| {
                         Ok(Handle {
@@ -431,7 +471,8 @@ impl Storage {
                             name: row.get(1)?,
                             script_pubkey: row.get(2)?,
                             commitment_root: row.get(3)?,
-                            publish_status: row.get(4)?,
+                            commitment_idx: row.get::<_, Option<i64>>(4)?.map(|v| v as usize),
+                            publish_status: row.get(5)?,
                         })
                     },
                 )
@@ -446,7 +487,7 @@ impl Storage {
         spawn_blocking(move || {
             let conn = conn.lock().unwrap();
             let mut stmt = conn
-                .prepare("SELECT id, name, script_pubkey, commitment_root, publish_status FROM handles ORDER BY name ASC")?;
+                .prepare("SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status FROM handles ORDER BY name ASC")?;
             let handles = stmt
                 .query_map([], |row| {
                     Ok(Handle {
@@ -454,7 +495,8 @@ impl Storage {
                         name: row.get(1)?,
                         script_pubkey: row.get(2)?,
                         commitment_root: row.get(3)?,
-                        publish_status: row.get(4)?,
+                        commitment_idx: row.get::<_, Option<i64>>(4)?.map(|v| v as usize),
+                        publish_status: row.get(5)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -485,7 +527,7 @@ impl Storage {
         spawn_blocking(move || {
             let conn = conn.lock().unwrap();
             let mut stmt = conn.prepare(
-                "SELECT id, name, script_pubkey, commitment_root, publish_status FROM handles ORDER BY id DESC LIMIT ? OFFSET ?",
+                "SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status FROM handles ORDER BY id DESC LIMIT ? OFFSET ?",
             )?;
             let handles = stmt
                 .query_map(params![limit as i64, offset as i64], |row| {
@@ -494,7 +536,8 @@ impl Storage {
                         name: row.get(1)?,
                         script_pubkey: row.get(2)?,
                         commitment_root: row.get(3)?,
-                        publish_status: row.get(4)?,
+                        commitment_idx: row.get::<_, Option<i64>>(4)?.map(|v| v as usize),
+                        publish_status: row.get(5)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -509,7 +552,7 @@ impl Storage {
         spawn_blocking(move || {
             let conn = conn.lock().unwrap();
             let mut stmt = conn
-                .prepare("SELECT id, name, script_pubkey, commitment_root, publish_status FROM handles WHERE commitment_root IS NULL ORDER BY name ASC")?;
+                .prepare("SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status FROM handles WHERE commitment_root IS NULL ORDER BY name ASC")?;
             let handles = stmt
                 .query_map([], |row| {
                     Ok(Handle {
@@ -517,7 +560,8 @@ impl Storage {
                         name: row.get(1)?,
                         script_pubkey: row.get(2)?,
                         commitment_root: row.get(3)?,
-                        publish_status: row.get(4)?,
+                        commitment_idx: row.get::<_, Option<i64>>(4)?.map(|v| v as usize),
+                        publish_status: row.get(5)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -526,15 +570,15 @@ impl Storage {
         .await?
     }
 
-    /// Commit all staged handles by setting their commitment_root
-    pub async fn commit_staged_handles(&self, root: &str) -> anyhow::Result<usize> {
+    /// Commit all staged handles by setting their commitment_root and commitment_idx
+    pub async fn commit_staged_handles(&self, root: &str, idx: usize) -> anyhow::Result<usize> {
         let conn = self.conn.clone();
         let root = root.to_string();
         spawn_blocking(move || {
             let conn = conn.lock().unwrap();
             let count = conn.execute(
-                "UPDATE handles SET commitment_root = ? WHERE commitment_root IS NULL",
-                params![root],
+                "UPDATE handles SET commitment_root = ?, commitment_idx = ? WHERE commitment_root IS NULL",
+                params![root, idx as i64],
             )?;
             Ok(count)
         })
@@ -571,6 +615,23 @@ impl Storage {
         .await?
     }
 
+    pub async fn get_handle_spk(&self, name: &str) -> anyhow::Result<Option<ScriptBuf>> {
+        let conn = self.conn.clone();
+        let name = name.to_string();
+        spawn_blocking(move || {
+            let conn = conn.lock().unwrap();
+            let spk = conn
+                .query_row(
+                    "SELECT script_pubkey FROM handles WHERE name = ?",
+                    params![name],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            Ok(spk.map(|spk| ScriptBuf::from_bytes(spk)))
+        })
+            .await?
+    }
+
     /// Check if a handle is staged (exists with NULL commitment_root)
     pub async fn is_staged(&self, name: &str) -> anyhow::Result<Option<Vec<u8>>> {
         let conn = self.conn.clone();
@@ -596,7 +657,7 @@ impl Storage {
         spawn_blocking(move || {
             let conn = conn.lock().unwrap();
             let mut stmt = conn.prepare(
-                "SELECT id, name, script_pubkey, commitment_root, publish_status FROM handles WHERE commitment_root = ? ORDER BY name ASC",
+                "SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status FROM handles WHERE commitment_root = ? ORDER BY name ASC",
             )?;
             let handles = stmt
                 .query_map(params![root], |row| {
@@ -605,7 +666,8 @@ impl Storage {
                         name: row.get(1)?,
                         script_pubkey: row.get(2)?,
                         commitment_root: row.get(3)?,
-                        publish_status: row.get(4)?,
+                        commitment_idx: row.get::<_, Option<i64>>(4)?.map(|v| v as usize),
+                        publish_status: row.get(5)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -616,49 +678,30 @@ impl Storage {
 
     // Publishing
 
-    /// List unpublished staged handles (commitment_root IS NULL, publish_status IS NULL)
-    pub async fn list_unpublished_staged(&self) -> anyhow::Result<Vec<Handle>> {
+    /// List handles that need certificate publishing:
+    /// - publish_status IS NULL (no cert yet), or
+    /// - publish_status = 'temp' AND commitment_idx <= confirmed_idx (committed and included in confirmed tip)
+    pub async fn list_unpublished(&self, confirmed_idx: Option<usize>) -> anyhow::Result<Vec<Handle>> {
         let conn = self.conn.clone();
         spawn_blocking(move || {
             let conn = conn.lock().unwrap();
             let mut stmt = conn.prepare(
-                "SELECT id, name, script_pubkey, commitment_root, publish_status FROM handles
-                 WHERE commitment_root IS NULL AND publish_status IS NULL ORDER BY name ASC",
-            )?;
-            let handles = stmt
-                .query_map([], |row| {
-                    Ok(Handle {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        script_pubkey: row.get(2)?,
-                        commitment_root: row.get(3)?,
-                        publish_status: row.get(4)?,
-                    })
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(handles)
-        })
-        .await?
-    }
-
-    /// List committed handles that need final cert publication
-    pub async fn list_unpublished_committed(&self) -> anyhow::Result<Vec<Handle>> {
-        let conn = self.conn.clone();
-        spawn_blocking(move || {
-            let conn = conn.lock().unwrap();
-            let mut stmt = conn.prepare(
-                "SELECT id, name, script_pubkey, commitment_root, publish_status FROM handles
-                 WHERE commitment_root IS NOT NULL AND (publish_status IS NULL OR publish_status != 'final')
+                "SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status FROM handles
+                 WHERE publish_status IS NULL
+                    OR (publish_status = 'temp' AND commitment_idx IS NOT NULL AND commitment_idx <= ?)
                  ORDER BY name ASC",
             )?;
+            // Use -1 when no confirmed idx so the temp upgrade clause never matches
+            let idx_param = confirmed_idx.map(|v| v as i64).unwrap_or(-1);
             let handles = stmt
-                .query_map([], |row| {
+                .query_map(params![idx_param], |row| {
                     Ok(Handle {
                         id: row.get(0)?,
                         name: row.get(1)?,
                         script_pubkey: row.get(2)?,
                         commitment_root: row.get(3)?,
-                        publish_status: row.get(4)?,
+                        commitment_idx: row.get::<_, Option<i64>>(4)?.map(|v| v as usize),
+                        publish_status: row.get(5)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;

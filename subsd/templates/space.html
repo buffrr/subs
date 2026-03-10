@@ -1,90 +1,138 @@
 {% extends "base.html" %}
-
 {% block title %}{{ space.space }} - subsd{% endblock %}
 
 {% block content %}
-<div class="space-y-6">
-    <!-- Header -->
-    <div class="flex items-center justify-between">
-        <div>
-            <a href="/" class="text-sm text-gray-500 hover:text-gray-700 transition-colors">&larr; Back</a>
-            <h1 class="text-xl font-semibold text-gray-900 mono mt-1">{{ space.space }}</h1>
+<div class="space-y-8 animate-fade-in">
+    <div>
+        <div class="flex items-center gap-3">
+            <a href="/" class="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-300 transition-colors">
+                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>Back
+            </a>
+            <div class="h-5 w-px bg-zinc-700"></div>
+            <h1 class="text-2xl font-bold text-zinc-100 font-mono tracking-tight">{{ space.space }}</h1>
+            {% if space.has_groth16 %}<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-semibold text-emerald-400">SNARK</span>{% endif %}
+            {% if space.has_receipt %}<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-semibold text-blue-400">STARK</span>{% endif %}
         </div>
     </div>
 
     <!-- Stats -->
-    <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-        <div class="bg-white rounded-sm shadow-sm p-4">
-            <dt class="text-xs text-gray-500 uppercase tracking-wide">Total Handles</dt>
-            <dd class="mt-1 text-2xl font-semibold text-gray-900">{{ space.total_handles }}</dd>
-        </div>
-        <div class="bg-white rounded-sm shadow-sm p-4">
-            <dt class="text-xs text-gray-500 uppercase tracking-wide">Committed</dt>
-            <dd class="mt-1 text-2xl font-semibold text-green-600">{{ space.committed_handles }}</dd>
-        </div>
-        <div class="bg-white rounded-sm shadow-sm p-4">
-            <dt class="text-xs text-gray-500 uppercase tracking-wide">Staged</dt>
-            <dd class="mt-1 text-2xl font-semibold {% if space.staged_handles > 0 %}text-orange-500{% else %}text-gray-400{% endif %}">{{ space.staged_handles }}</dd>
-        </div>
-        <div class="bg-white rounded-sm shadow-sm p-4">
-            <dt class="text-xs text-gray-500 uppercase tracking-wide">Commitments</dt>
-            <dd class="mt-1 text-2xl font-semibold text-gray-900">{{ space.commitments }}</dd>
-        </div>
-        <div class="bg-white rounded-sm shadow-sm p-4">
-            <dt class="text-xs text-gray-500 uppercase tracking-wide">STARK</dt>
-            <dd class="mt-1 text-2xl font-semibold {% if space.has_receipt %}text-green-600{% else %}text-gray-300{% endif %}">
-                {% if space.has_receipt %}Yes{% else %}No{% endif %}
-            </dd>
-        </div>
-        <div class="bg-white rounded-sm shadow-sm p-4">
-            <dt class="text-xs text-gray-500 uppercase tracking-wide">SNARK</dt>
-            <dd class="mt-1 text-2xl font-semibold {% if space.has_groth16 %}text-green-600{% else %}text-gray-300{% endif %}">
-                {% if space.has_groth16 %}Yes{% else %}No{% endif %}
-            </dd>
-        </div>
-    </div>
-
-    <!-- Commitment Pipeline -->
-    <div class="bg-white rounded-sm shadow-sm p-6">
-        <div class="flex items-center justify-between mb-4">
-            <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">Commitment Pipeline</h2>
-            <button onclick="refreshPipeline()" class="text-xs text-gray-500 hover:text-gray-700 transition-colors">Refresh</button>
-        </div>
-        <div id="pipelineStepper" class="text-gray-600">Loading...</div>
-        <div id="pipelineMessage" class="mt-3 text-sm text-gray-500"></div>
-        <div id="pipelineActions" class="mt-4"></div>
-        <div id="provingEndpoint" class="mt-3 text-xs"></div>
-    </div>
-
-    <!-- Handles Table -->
-    <div class="bg-white rounded-sm shadow-sm p-6">
-        <div class="flex items-center justify-between mb-4">
-            <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">Handles</h2>
-            <div id="handlesPagination" class="flex items-center gap-2 text-sm">
-                <!-- Pagination controls will be inserted here -->
+    <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div class="card rounded-2xl p-5">
+            <div class="flex items-center gap-2 mb-2">
+                <div class="h-5 w-5 rounded-lg bg-zinc-700/50 flex items-center justify-center"><svg class="h-3 w-3 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg></div>
+                <span class="text-xs text-zinc-500 font-medium">Total</span>
             </div>
+            <p class="text-2xl font-bold text-zinc-100 tabular-nums">{{ space.total_handles }}</p>
+        </div>
+        <div class="card rounded-2xl p-5">
+            <div class="flex items-center gap-2 mb-2">
+                <div class="h-5 w-5 rounded-lg bg-emerald-500/10 flex items-center justify-center"><svg class="h-3 w-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>
+                <span class="text-xs text-zinc-500 font-medium">Committed</span>
+            </div>
+            <p class="text-2xl font-bold text-emerald-400 tabular-nums">{{ space.committed_handles }}</p>
+        </div>
+        <div class="card rounded-2xl p-5">
+            <div class="flex items-center gap-2 mb-2">
+                <div class="h-5 w-5 rounded-lg bg-amber-500/10 flex items-center justify-center"><svg class="h-3 w-3 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>
+                <span class="text-xs text-zinc-500 font-medium">Staged</span>
+            </div>
+            <p class="text-2xl font-bold tabular-nums {% if space.staged_handles > 0 %}text-amber-400{% else %}text-zinc-600{% endif %}">{{ space.staged_handles }}</p>
+        </div>
+        <div class="card rounded-2xl p-5">
+            <div class="flex items-center gap-2 mb-2">
+                <div class="h-5 w-5 rounded-lg bg-violet-500/10 flex items-center justify-center"><svg class="h-3 w-3 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z"/></svg></div>
+                <span class="text-xs text-zinc-500 font-medium">Commits</span>
+            </div>
+            <p class="text-2xl font-bold text-zinc-100 tabular-nums">{{ space.commitments }}</p>
+        </div>
+    </div>
+
+    <!-- Pipeline -->
+    <div class="card rounded-3xl overflow-hidden">
+        <div class="border-b divider px-6 py-4 flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-zinc-300">Commitment Pipeline</h2>
+            <button onclick="refreshPipeline()" class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1">
+                <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg>Refresh
+            </button>
+        </div>
+        <div class="p-6">
+            <div id="pipelineStepper" class="text-zinc-500 text-sm">Loading...</div>
+            <div id="pipelineMessage" class="mt-3 text-sm text-zinc-500"></div>
+            <div id="pipelineActions" class="mt-5"></div>
+            <div id="provingEndpoint" class="mt-3 text-xs"></div>
+        </div>
+    </div>
+
+    <!-- Publish -->
+    <div id="publishBar" class="hidden animate-fade-in">
+        <button onclick="publishCerts()" class="w-full rounded-2xl px-6 py-4 text-sm font-medium text-white transition-all duration-200 flex items-center justify-center gap-2.5" style="background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 0 20px rgba(16,185,129,0.15)">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/></svg>
+            <span id="publishLabel">Publish Certificates</span>
+        </button>
+    </div>
+
+    <!-- Handles -->
+    <div class="card rounded-3xl overflow-hidden">
+        <div class="border-b divider px-6 py-4 flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-zinc-300">Handles</h2>
+            <div class="flex items-center gap-3">
+                <div id="handlesPagination" class="flex items-center gap-2 text-sm"></div>
+                <button onclick="toggleStageForm()" id="stageToggleBtn" class="btn-secondary rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all flex items-center gap-1.5">
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                    Add
+                </button>
+            </div>
+        </div>
+        <div id="stageForm" class="hidden border-b divider px-6 py-4 animate-fade-in">
+            <form id="addHandleForm" class="flex items-end gap-3">
+                <div class="flex-1">
+                    <label class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">Handle</label>
+                    <div class="flex">
+                        <input type="text" id="stageHandle" placeholder="alice" class="flex-1 rounded-l-lg input-field px-3 py-2 text-sm transition-all" required>
+                        <span class="inline-flex items-center rounded-r-lg bg-surface-300 border border-l-0 border-zinc-700 px-3 text-sm text-zinc-400 font-mono">{{ space.space }}</span>
+                    </div>
+                </div>
+                <div id="scriptPubkeyField" class="hidden flex-1">
+                    <label class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">Script Pubkey</label>
+                    <input type="text" id="stageScriptPubkey" placeholder="5120..." class="w-full rounded-lg input-field px-3 py-2 text-sm font-mono transition-all">
+                </div>
+                <button type="button" onclick="toggleScriptPubkey()" class="px-2 py-2 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-surface-300 transition-colors" title="Custom script pubkey">
+                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
+                </button>
+                <button type="submit" class="btn-primary rounded-lg px-4 py-2 text-sm font-medium text-white transition-all duration-200">Stage</button>
+            </form>
+            <div class="flex items-center gap-3 mt-3">
+                <button onclick="toggleBulkForm()" class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Bulk add...</button>
+            </div>
+            <div id="bulkForm" class="hidden mt-3 animate-fade-in">
+                <form id="bulkAddForm" class="space-y-3">
+                    <textarea id="bulkJson" rows="3" placeholder='[{"handle": "alice{{ space.space }}", "script_pubkey": "5120..."}]' class="block w-full rounded-lg input-field px-3 py-2 text-sm font-mono transition-all resize-none"></textarea>
+                    <button type="submit" class="btn-primary rounded-lg px-4 py-2 text-sm font-medium text-white transition-all duration-200">Stage All</button>
+                </form>
+            </div>
+            <div id="stageResult" class="hidden mt-3 animate-fade-in"></div>
         </div>
         <div id="handlesTable" class="overflow-x-auto">
             <table class="w-full text-sm">
-                <thead>
-                    <tr class="border-b border-gray-200">
-                        <th class="text-left py-2 px-3 text-gray-500 font-medium">Handle</th>
-                        <th class="text-left py-2 px-3 text-gray-500 font-medium">Script Pubkey</th>
-                        <th class="text-left py-2 px-3 text-gray-500 font-medium">Status</th>
-                    </tr>
-                </thead>
-                <tbody id="handlesBody" class="divide-y divide-gray-100">
-                    <tr><td colspan="3" class="py-4 text-center text-gray-400">Loading...</td></tr>
+                <thead><tr class="border-b divider">
+                    <th class="text-left py-3 px-6 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Handle</th>
+                    <th class="text-left py-3 px-6 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Script Pubkey</th>
+                    <th class="text-left py-3 px-6 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Status</th>
+                </tr></thead>
+                <tbody id="handlesBody" class="divide-y divide-zinc-800">
+                    <tr><td colspan="3" class="py-8 text-center text-zinc-600">Loading...</td></tr>
                 </tbody>
             </table>
         </div>
     </div>
 
-    <!-- Actions Log -->
-    <div class="bg-white rounded-sm shadow-sm p-6">
-        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Activity Log</h2>
-        <div id="actionsLog" class="space-y-1 text-sm text-gray-600 mono max-h-48 overflow-y-auto">
-            <p class="text-gray-400">No activity yet</p>
+    <!-- Activity -->
+    <div class="card rounded-3xl overflow-hidden">
+        <div class="border-b divider px-6 py-4"><h2 class="text-sm font-semibold text-zinc-300">Activity Log</h2></div>
+        <div class="p-6">
+            <div id="actionsLog" class="space-y-1.5 text-sm text-zinc-500 font-mono max-h-48 overflow-y-auto scrollbar-thin">
+                <p class="text-zinc-600">No activity yet</p>
+            </div>
         </div>
     </div>
 </div>
@@ -92,403 +140,50 @@
 
 {% block scripts %}
 <script>
-const space = '{{ space.space }}';
+const space='{{ space.space }}';
+async function refreshPipeline(){try{const r=await fetch(`/spaces/${encodeURIComponent(space)}/pipeline`),j=await r.json();currentPipeline=j;const st=document.getElementById('pipelineStepper'),mg=document.getElementById('pipelineMessage'),ac=document.getElementById('pipelineActions'),pr=document.getElementById('provingEndpoint');updatePublishBar(j.unpublished||0);if(!j.has_pending){const sc=j.staged_count||0;if(sc>0){st.innerHTML=`<div class="flex items-center gap-2.5"><div class="h-8 w-8 rounded-xl bg-amber-500/10 flex items-center justify-center"><svg class="h-4 w-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div><span class="text-sm text-zinc-400"><strong class="text-zinc-200">${sc}</strong> handle${sc>1?'s':''} staged</span></div>`;ac.innerHTML=`<div class="flex gap-2.5"><button onclick="commitLocal()" class="btn-primary rounded-xl px-5 py-2.5 text-sm font-medium text-white transition-all duration-200">Commit Local</button></div>`}else{st.innerHTML=`<div class="flex items-center gap-2.5 text-zinc-500"><div class="h-8 w-8 rounded-xl bg-surface-300 flex items-center justify-center"><svg class="h-4 w-4 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></div><span class="text-sm">Stage handles to start a new commitment</span></div>`;ac.innerHTML=''}mg.textContent='';pr.innerHTML='';loadHandles(currentPage);return}renderStepper(j);renderMessage(j.message,mg);renderActions(j);if(j.steps.proving==='in_progress'){pr.innerHTML=`<div class="mt-4 p-4 bg-surface-200 rounded-xl border border-zinc-700/50 space-y-1.5 text-xs"><div><span class="text-zinc-500">Get request:</span> <a href="/spaces/${encodeURIComponent(space)}/proving/next" target="_blank" class="text-accent-500 hover:underline font-mono">GET /spaces/${space}/proving/next</a></div><div><span class="text-zinc-500">Submit:</span> <span class="text-accent-500 font-mono">POST /spaces/${space}/proving/fulfill</span></div></div>`}else pr.innerHTML='';loadHandles(currentPage)}catch(e){document.getElementById('pipelineStepper').innerHTML=`<span class="text-red-400 text-sm">${e.message}</span>`}}
 
-async function refreshPipeline() {
-    try {
-        const response = await fetch(`/spaces/${encodeURIComponent(space)}/pipeline`);
-        const result = await response.json();
+function renderMessage(msg,el){if(!msg){el.innerHTML='';return}const m=msg.match(/^(\d+)\/(\d+)\s+confirmations$/);if(m){const cur=parseInt(m[1]),max=parseInt(m[2]),pct=Math.min((cur/max)*100,100),left=max-cur;el.innerHTML=`<div class="flex items-center gap-3"><div class="flex-1 h-2 bg-surface-300 rounded-full overflow-hidden"><div class="h-full rounded-full transition-all duration-500" style="width:${pct}%;background:linear-gradient(90deg,#f97316,#fb923c)${pct>0?';box-shadow:0 0 8px rgba(249,115,22,0.3)':''}"></div></div><span class="text-xs text-zinc-500 tabular-nums whitespace-nowrap"><span class="text-zinc-300 font-mono">${cur}</span><span class="text-zinc-600">/</span><span class="font-mono">${max}</span></span></div>`}else{el.textContent=msg}}
 
-        // Store pipeline for handle status rendering
-        currentPipeline = result;
+function renderActions(r){const a=document.getElementById('pipelineActions');let h='<div class="flex gap-2.5">';if(r.current_step==='broadcast')h+=`<button onclick="broadcast()" class="btn-primary rounded-xl px-5 py-2.5 text-sm font-medium text-white transition-all duration-200">Broadcast On-Chain</button>`;h+='</div>';a.innerHTML=h}
 
-        const stepperEl = document.getElementById('pipelineStepper');
-        const msgEl = document.getElementById('pipelineMessage');
-        const actionsEl = document.getElementById('pipelineActions');
-        const provingEl = document.getElementById('provingEndpoint');
+function updatePublishBar(n){const bar=document.getElementById('publishBar'),lbl=document.getElementById('publishLabel');if(n>0){lbl.textContent=`Publish Certificates (${n})`;bar.classList.remove('hidden')}else{bar.classList.add('hidden')}}
 
-        // If no pending commitment, show staging view
-        if (!result.has_pending) {
-            const stagedCount = result.staged_count || 0;
-            if (stagedCount > 0) {
-                stepperEl.innerHTML = `<div class="text-gray-600">${stagedCount} handle(s) staged and ready to commit.</div>`;
-                actionsEl.innerHTML = `<div class="flex gap-2">
-                    <button onclick="commitLocal()" class="rounded-sm bg-bitcoin-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-bitcoin-600 transition-colors">
-                        Commit Local (${stagedCount} staged)
-                    </button>
-                    <button onclick="publishStaged()" class="rounded-sm bg-gray-700 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-800 transition-colors">
-                        Publish Staged Certs
-                    </button>
-                </div>`;
-            } else {
-                stepperEl.innerHTML = `<div class="text-gray-500">Stage handles to start a new commitment.</div>`;
-                actionsEl.innerHTML = '';
-            }
-            msgEl.textContent = '';
-            provingEl.innerHTML = '';
-            // Refresh handles to update their status
-            loadHandles(currentPage);
-            return;
-        }
+function renderStepper(r){const steps=[{key:'local',label:'Local',ic:'M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z'},{key:'proving',label:'Proving',ic:'M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z'},{key:'broadcast',label:'Broadcast',ic:'M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5'},{key:'confirmed',label:'Confirmed',ic:'M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z'},{key:'finalized',label:'Finalized',ic:'M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z'}];
+const vis=steps.filter(s=>r.steps[s.key]!=='skipped');let h='<div class="flex items-center">';vis.forEach((s,i)=>{const st=r.steps[s.key];if(i>0){const pc=r.steps[vis[i-1].key]==='complete'?'bg-emerald-500/50':'bg-zinc-700';h+=`<div class="flex-1 h-px ${pc} mx-1"></div>`}let bg,ic,lbl;if(st==='complete'){bg='bg-emerald-500/10 border border-emerald-500/20';ic='text-emerald-400';lbl='text-emerald-400 font-semibold'}else if(st==='in_progress'){bg='bg-accent-500/10 border border-accent-500/20 shimmer';ic='text-accent-500';lbl='text-accent-500 font-semibold'}else{bg='bg-surface-300 border border-zinc-600';ic='text-zinc-500';lbl='text-zinc-500'}
+h+=`<div class="flex flex-col items-center min-w-[60px]"><div class="flex h-10 w-10 items-center justify-center rounded-2xl ${bg}">${st==='complete'?'<svg class="h-5 w-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>':`<svg class="h-4 w-4 ${ic}" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="${s.ic}"/></svg>`}</div><span class="text-[11px] mt-1.5 ${lbl}">${s.label}</span></div>`});h+='</div>';
+if(r.commitment_idx!=null){h+=`<div class="mt-5 p-4 bg-surface-200 rounded-xl border border-zinc-700/50 space-y-1.5"><div class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Commitment #${r.commitment_idx}</div>`;if(r.root)h+=`<div class="text-xs"><span class="text-zinc-500">Root: </span><span class="text-zinc-300 font-mono select-all">${r.root}</span></div>`;if(r.txid)h+=`<div class="text-xs"><span class="text-zinc-500">Txid: </span><span class="text-zinc-300 font-mono select-all">${r.txid}</span></div>`;h+='</div>'}document.getElementById('pipelineStepper').innerHTML=h}
 
-        // Show pipeline stepper for pending commitment
-        renderPipelineStepper(result);
-        msgEl.textContent = result.message || '';
-        renderPipelineActions(result);
+async function commitLocal(){logAction('Committing...');try{const r=await fetch(`/spaces/${encodeURIComponent(space)}/commit`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dry_run:false})}),j=await r.json();if(r.ok){logAction(`Committed ${j.handles_committed} handles`);location.reload()}else logAction(`Error: ${JSON.stringify(j)}`)}catch(e){logAction(e.message)}}
 
-        // Show proving endpoints if proving is in progress
-        if (result.steps.proving === 'in_progress') {
-            provingEl.innerHTML = `
-                <div class="space-y-1">
-                    <div><span class="text-gray-500">Get proof request:</span> <a href="/spaces/${encodeURIComponent(space)}/proving/next" target="_blank" class="text-bitcoin-600 hover:underline mono">GET /spaces/${space}/proving/next</a></div>
-                    <div><span class="text-gray-500">Submit receipt:</span> <span class="text-bitcoin-600 mono">POST /spaces/${space}/proving/fulfill</span></div>
-                </div>
-            `;
-        } else {
-            provingEl.innerHTML = '';
-        }
+async function broadcast(){let f=null;try{const r=await fetch('/fees');if(r.ok)f=await r.json()}catch(e){}let p='Fee rate (sat/vB):\n\n';if(f)p+=`Fastest: ${f.fastestFee} | Half hour: ${f.halfHourFee} | Hour: ${f.hourFee} | Economy: ${f.economyFee}\n\n`;p+='Empty for wallet estimate:';const i=prompt(p);if(i===null)return;const fr=i.trim()===''?null:parseFloat(i);logAction(`Broadcasting${fr?' at '+fr+' sat/vB':''}...`);try{const r=await fetch(`/spaces/${encodeURIComponent(space)}/broadcast`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(fr?{fee_rate:fr}:{})}),j=await r.json();if(r.ok){logAction(`TX: ${j.txid}`);refreshPipeline()}else logAction(`Error: ${j.error||JSON.stringify(j)}`)}catch(e){logAction(e.message)}}
 
-        // Refresh handles to update their status
-        loadHandles(currentPage);
-    } catch (e) {
-        document.getElementById('pipelineStepper').innerHTML = `<span class="text-red-600">Error: ${e.message}</span>`;
-    }
-}
+async function publishCerts(){logAction('Publishing certificates...');try{const r=await fetch(`/spaces/${encodeURIComponent(space)}/publish`,{method:'POST'}),j=await r.json();logAction(r.ok?(j.handles_published>0?`Published ${j.handles_published} certificate${j.handles_published>1?'s':''}`:'None to publish'):`Error: ${j.error||JSON.stringify(j)}`);if(r.ok)refreshPipeline()}catch(e){logAction(e.message)}}
 
-function renderPipelineActions(result) {
-    const actionsEl = document.getElementById('pipelineActions');
-    let html = '';
+function logAction(m){const l=document.getElementById('actionsLog'),t=new Date().toLocaleTimeString(),e=document.createElement('p');e.className='animate-fade-in';e.textContent=`[${t}] ${m}`;l.insertBefore(e,l.firstChild);const p=l.querySelector('.text-zinc-600');if(p&&p.textContent==='No activity yet')p.remove()}
 
-    // Show broadcast button if we're at broadcast step
-    if (result.current_step === 'broadcast') {
-        html += `<button onclick="broadcast()" class="rounded-sm bg-bitcoin-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-bitcoin-600 transition-colors">
-            Broadcast On-Chain
-        </button>`;
-    }
+let currentPage=1,perPage=20,currentPipeline=null;
+async function loadHandles(pg=1){currentPage=pg;try{const r=await fetch(`/spaces/${encodeURIComponent(space)}/handles?page=${pg}&per_page=${perPage}`);if(!r.ok){document.getElementById('handlesBody').innerHTML=`<tr><td colspan="3" class="py-8 text-center text-red-400 text-sm">Failed to load handles</td></tr>`;return}const j=await r.json();renderTable(j);renderPag(j)}catch(e){document.getElementById('handlesBody').innerHTML=`<tr><td colspan="3" class="py-8 text-center text-red-400 text-sm">${e.message}</td></tr>`}}
 
-    // Show publish button when finalized but not yet published
-    if (result.steps.published === 'in_progress') {
-        html += `<button onclick="publishCerts()" class="rounded-sm bg-green-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-green-700 transition-colors">
-            Publish Certificates
-        </button>`;
-    }
+function badge(h){const pb=pubBadge(h.publish_status);if(!h.commitment_root)return'<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-medium text-zinc-400">Staged</span>'+pb;if(currentPipeline&&currentPipeline.root===h.commitment_root){const s=currentPipeline.steps;if(s.finalized==='complete')return'<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-medium text-emerald-400">Finalized</span>'+pb;if(s.confirmed==='complete'||s.confirmed==='in_progress')return'<span class="rounded-lg px-2 py-0.5 text-[11px] font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20 animate-pulse">Confirming</span>'+pb;if(s.broadcast==='complete'||s.broadcast==='in_progress')return'<span class="rounded-lg px-2 py-0.5 text-[11px] font-medium text-accent-500 bg-accent-500/10 border border-accent-500/20 animate-pulse">Broadcast</span>'+pb;if(s.proving==='in_progress')return'<span class="rounded-lg px-2 py-0.5 text-[11px] font-medium text-violet-400 bg-violet-500/10 border border-violet-500/20 animate-pulse">Proving</span>'+pb;return'<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-medium text-zinc-400 animate-pulse">Pending</span>'+pb}return'<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-medium text-emerald-400">Finalized</span>'+pb}
 
-    actionsEl.innerHTML = html;
-}
+function pubBadge(s){if(s==='final')return' <span class="rounded-lg px-2 py-0.5 text-[11px] font-medium text-blue-400 bg-blue-500/10 border border-blue-500/20">Published</span>';if(s==='temp')return' <span class="rounded-lg px-2 py-0.5 text-[11px] font-medium text-purple-400 bg-purple-500/10 border border-purple-500/20">Temp Cert</span>';return''}
 
-function renderPipelineStepper(result) {
-    const steps = [
-        { key: 'local', label: 'Local' },
-        { key: 'proving', label: 'Proving' },
-        { key: 'broadcast', label: 'Broadcast' },
-        { key: 'confirmed', label: 'Confirmed' },
-        { key: 'finalized', label: 'Finalized' },
-        { key: 'published', label: 'Published' }
-    ];
+function renderTable(r){const tb=document.getElementById('handlesBody');if(!r.handles||!r.handles.length){tb.innerHTML='<tr><td colspan="3" class="py-8 text-center text-zinc-600 text-sm">No handles</td></tr>';return}tb.innerHTML=r.handles.map(h=>`<tr class="hover:bg-surface-200 transition-colors"><td class="py-3 px-6 font-mono text-sm text-zinc-200 font-medium">${esc(h.name)}</td><td class="py-3 px-6 font-mono text-xs text-zinc-500"><span title="${h.script_pubkey}">${h.script_pubkey.slice(0,16)}...${h.script_pubkey.slice(-8)}</span></td><td class="py-3 px-6">${badge(h)}</td></tr>`).join('')}
 
-    let html = '<div class="flex items-center gap-2">';
+function renderPag(r){const c=document.getElementById('handlesPagination');if(r.total_pages<=1){c.innerHTML=`<span class="text-xs text-zinc-500">${r.total} handle${r.total!==1?'s':''}</span>`;return}c.innerHTML=`<span class="text-xs text-zinc-500">${r.total} handles</span><div class="flex items-center gap-0.5 ml-3"><button onclick="loadHandles(${currentPage-1})" class="px-2 py-1 rounded-lg text-xs text-zinc-400 hover:bg-surface-300 disabled:opacity-30 transition-colors" ${currentPage<=1?'disabled':''}>&larr;</button><span class="px-2 text-xs text-zinc-500 tabular-nums">${r.page}/${r.total_pages}</span><button onclick="loadHandles(${currentPage+1})" class="px-2 py-1 rounded-lg text-xs text-zinc-400 hover:bg-surface-300 disabled:opacity-30 transition-colors" ${currentPage>=r.total_pages?'disabled':''}>&rarr;</button></div>`}
 
-    steps.forEach((step, i) => {
-        const state = result.steps[step.key];
+function esc(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML}
 
-        // Skip if skipped (e.g., proving for initial commit)
-        if (state === 'skipped') return;
+function toggleStageForm(){document.getElementById('stageForm').classList.toggle('hidden')}
+function toggleScriptPubkey(){document.getElementById('scriptPubkeyField').classList.toggle('hidden')}
+function toggleBulkForm(){document.getElementById('bulkForm').classList.toggle('hidden')}
+function showStageResult(msg,ok){const el=document.getElementById('stageResult');el.className=`mt-3 p-3 rounded-lg text-sm animate-fade-in ${ok?'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20':'bg-red-500/10 text-red-400 border border-red-500/20'}`;el.textContent=msg;el.classList.remove('hidden');if(ok)setTimeout(()=>el.classList.add('hidden'),3000)}
 
-        // Add connector (except before first visible step)
-        if (i > 0 && result.steps[steps[i-1].key] !== 'skipped') {
-            const prevState = result.steps[steps[i-1].key];
-            const connectorColor = prevState === 'complete' ? 'bg-green-400' : 'bg-gray-200';
-            html += `<div class="w-8 h-0.5 ${connectorColor}"></div>`;
-        }
+document.getElementById('addHandleForm').addEventListener('submit',async e=>{e.preventDefault();const name=document.getElementById('stageHandle').value.trim(),spk=document.getElementById('stageScriptPubkey').value.trim(),handle=name+'{{ space.space }}',reqs=[{handle,script_pubkey:spk||undefined}];if(!spk){try{const g=await fetch('/requests/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({handle})});if(!g.ok){showStageResult(JSON.stringify((await g.json()).error||'Failed'),false);return}const r=await g.json();reqs[0]=r.request}catch(e){showStageResult(e.message,false);return}}try{const res=await fetch('/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requests:reqs})}),j=await res.json();if(res.ok){showStageResult(`Staged ${handle}`,true);document.getElementById('stageHandle').value='';document.getElementById('stageScriptPubkey').value='';refreshPipeline();loadHandles(currentPage)}else showStageResult(j.error||JSON.stringify(j),false)}catch(e){showStageResult(e.message,false)}});
 
-        // Step circle and label
-        let circleClass, labelClass, icon;
-        if (state === 'complete') {
-            circleClass = 'bg-green-500 text-white';
-            labelClass = 'text-green-600 font-medium';
-            icon = '✓';
-        } else if (state === 'in_progress') {
-            circleClass = 'bg-bitcoin-500 text-white animate-pulse';
-            labelClass = 'text-bitcoin-600 font-medium';
-            icon = '●';
-        } else {
-            circleClass = 'bg-gray-200 text-gray-400';
-            labelClass = 'text-gray-400';
-            icon = '○';
-        }
+document.getElementById('bulkAddForm').addEventListener('submit',async e=>{e.preventDefault();try{const reqs=JSON.parse(document.getElementById('bulkJson').value);const res=await fetch('/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requests:reqs})}),j=await res.json();if(res.ok){showStageResult(`Staged ${reqs.length} handle(s)`,true);document.getElementById('bulkJson').value='';refreshPipeline();loadHandles(currentPage)}else showStageResult(j.error||JSON.stringify(j),false)}catch(e){showStageResult(`Invalid JSON: ${e.message}`,false)}});
 
-        html += `
-            <div class="flex flex-col items-center">
-                <div class="w-8 h-8 rounded-full ${circleClass} flex items-center justify-center text-sm">${icon}</div>
-                <span class="text-xs mt-1 ${labelClass}">${step.label}</span>
-            </div>
-        `;
-    });
-
-    html += '</div>';
-
-    // Show commitment details if available
-    if (result.commitment_idx !== null && result.commitment_idx !== undefined) {
-        html += `<div class="mt-4 space-y-2 text-xs font-mono">`;
-        html += `<div class="text-gray-500">Commitment #${result.commitment_idx}</div>`;
-        if (result.root) {
-            html += `<div><span class="text-gray-400">Root:</span> <span class="text-gray-700 select-all">${result.root}</span></div>`;
-        }
-        if (result.txid) {
-            html += `<div><span class="text-gray-400">Txid:</span> <span class="text-gray-700 select-all">${result.txid}</span></div>`;
-        }
-        html += `</div>`;
-    }
-
-    document.getElementById('pipelineStepper').innerHTML = html;
-}
-
-async function commitLocal() {
-    logAction('Committing local...');
-    try {
-        const response = await fetch(`/spaces/${encodeURIComponent(space)}/commit`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ dry_run: false })
-        });
-        const result = await response.json();
-
-        if (response.ok) {
-            logAction(`Committed ${result.handles_committed} handles. Root: ${result.root.slice(0, 16)}...`);
-            location.reload();
-        } else {
-            logAction(`Error: ${JSON.stringify(result)}`);
-        }
-    } catch (e) {
-        logAction(`Error: ${e.message}`);
-    }
-}
-
-async function broadcast() {
-    // Try to fetch recommended fees
-    let fees = null;
-    try {
-        const feesResponse = await fetch('/fees');
-        if (feesResponse.ok) {
-            fees = await feesResponse.json();
-        }
-    } catch (e) {
-        // Ignore - fees will be null
-    }
-
-    // Build fee selection prompt
-    let promptMsg = 'Enter fee rate (sat/vB):\n\n';
-    if (fees) {
-        promptMsg += `Recommended rates from mempool.space:\n`;
-        promptMsg += `  Fastest (10 min): ${fees.fastestFee} sat/vB\n`;
-        promptMsg += `  Half hour: ${fees.halfHourFee} sat/vB\n`;
-        promptMsg += `  Hour: ${fees.hourFee} sat/vB\n`;
-        promptMsg += `  Economy: ${fees.economyFee} sat/vB\n\n`;
-    } else {
-        promptMsg += `Could not fetch recommended rates from mempool.space.\n\n`;
-    }
-    promptMsg += `Enter fee rate (leave empty to let wallet estimate):`;
-
-    const input = prompt(promptMsg);
-    if (input === null) return; // User cancelled
-
-    const feeRate = input.trim() === '' ? null : parseFloat(input);
-
-    logAction(`Broadcasting to chain${feeRate ? ` at ${feeRate} sat/vB` : ' (wallet estimate)'}...`);
-    try {
-        const body = feeRate ? { fee_rate: feeRate } : {};
-        const response = await fetch(`/spaces/${encodeURIComponent(space)}/broadcast`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        });
-        const result = await response.json();
-
-        if (response.ok) {
-            logAction(`Broadcast successful. TX: ${result.txid}`);
-            refreshPipeline();
-        } else {
-            logAction(`Error: ${result.error || JSON.stringify(result)}`);
-        }
-    } catch (e) {
-        logAction(`Error: ${e.message}`);
-    }
-}
-
-async function publishStaged() {
-    logAction('Publishing staged certificates...');
-    try {
-        const response = await fetch(`/spaces/${encodeURIComponent(space)}/publish/staged`, {
-            method: 'POST'
-        });
-        const result = await response.json();
-
-        if (response.ok) {
-            if (result.handles_published > 0) {
-                logAction(`Published ${result.handles_published} staged cert(s).`);
-            } else {
-                logAction('No unpublished staged handles.');
-            }
-            refreshPipeline();
-        } else {
-            logAction(`Error: ${result.error || JSON.stringify(result)}`);
-        }
-    } catch (e) {
-        logAction(`Error: ${e.message}`);
-    }
-}
-
-async function publishCerts() {
-    logAction('Publishing final certificates...');
-    try {
-        const response = await fetch(`/spaces/${encodeURIComponent(space)}/publish`, {
-            method: 'POST'
-        });
-        const result = await response.json();
-
-        if (response.ok) {
-            if (result.handles_published > 0) {
-                logAction(`Published ${result.handles_published} final cert(s).`);
-            } else {
-                logAction('No unpublished handles.');
-            }
-            refreshPipeline();
-        } else {
-            logAction(`Error: ${result.error || JSON.stringify(result)}`);
-        }
-    } catch (e) {
-        logAction(`Error: ${e.message}`);
-    }
-}
-
-function logAction(message) {
-    const log = document.getElementById('actionsLog');
-    const time = new Date().toLocaleTimeString();
-    const entry = document.createElement('p');
-    entry.textContent = `[${time}] ${message}`;
-    log.insertBefore(entry, log.firstChild);
-
-    // Remove placeholder
-    const placeholder = log.querySelector('.text-gray-500');
-    if (placeholder && placeholder.textContent === 'No actions yet') {
-        placeholder.remove();
-    }
-}
-
-// Handles pagination state
-let currentPage = 1;
-const perPage = 20;
-let currentPipeline = null; // Store pipeline status for handle rendering
-
-async function loadHandles(page = 1) {
-    currentPage = page;
-    try {
-        const response = await fetch(`/spaces/${encodeURIComponent(space)}/handles?page=${page}&per_page=${perPage}`);
-        const result = await response.json();
-
-        renderHandlesTable(result);
-        renderPagination(result);
-    } catch (e) {
-        document.getElementById('handlesBody').innerHTML =
-            `<tr><td colspan="3" class="py-4 text-center text-red-600">Error: ${e.message}</td></tr>`;
-    }
-}
-
-function getHandleStatusBadge(handle) {
-    const publishBadge = getPublishBadge(handle.publish_status);
-
-    // No commitment_root = staged
-    if (!handle.commitment_root) {
-        return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">Staged</span>' + publishBadge;
-    }
-
-    // Check if handle is in the current pipeline's commitment
-    if (currentPipeline && currentPipeline.root === handle.commitment_root) {
-        // Show pipeline status
-        const steps = currentPipeline.steps;
-        if (steps.finalized === 'complete') {
-            return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">Finalized</span>' + publishBadge;
-        } else if (steps.confirmed === 'complete' || steps.confirmed === 'in_progress') {
-            return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-bitcoin-100 text-bitcoin-600 animate-pulse">Confirming</span>' + publishBadge;
-        } else if (steps.broadcast === 'complete' || steps.broadcast === 'in_progress') {
-            return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-bitcoin-100 text-bitcoin-600 animate-pulse">Broadcast</span>' + publishBadge;
-        } else if (steps.proving === 'in_progress') {
-            return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-bitcoin-100 text-bitcoin-600 animate-pulse">Proving</span>' + publishBadge;
-        } else {
-            return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-bitcoin-100 text-bitcoin-600 animate-pulse">Pending</span>' + publishBadge;
-        }
-    }
-
-    // Different commitment_root = must be from a finalized commitment
-    return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">Finalized</span>' + publishBadge;
-}
-
-function getPublishBadge(publishStatus) {
-    if (publishStatus === 'final') {
-        return ' <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">Published</span>';
-    } else if (publishStatus === 'temp') {
-        return ' <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-600">Temp Cert</span>';
-    }
-    return '';
-}
-
-function renderHandlesTable(result) {
-    const tbody = document.getElementById('handlesBody');
-
-    if (result.handles.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="3" class="py-4 text-center text-gray-400">No handles registered</td></tr>';
-        return;
-    }
-
-    tbody.innerHTML = result.handles.map(handle => `
-        <tr class="hover:bg-gray-50">
-            <td class="py-2 px-3 mono text-gray-900">${escapeHtml(handle.name)}</td>
-            <td class="py-2 px-3 mono text-gray-600 text-xs">
-                <span title="${handle.script_pubkey}">${handle.script_pubkey.slice(0, 16)}...${handle.script_pubkey.slice(-8)}</span>
-            </td>
-            <td class="py-2 px-3">
-                ${getHandleStatusBadge(handle)}
-            </td>
-        </tr>
-    `).join('');
-}
-
-function renderPagination(result) {
-    const container = document.getElementById('handlesPagination');
-
-    if (result.total_pages <= 1) {
-        container.innerHTML = `<span class="text-gray-500">${result.total} handle${result.total !== 1 ? 's' : ''}</span>`;
-        return;
-    }
-
-    let html = `<span class="text-gray-500">${result.total} handles</span>`;
-    html += '<div class="flex items-center gap-1 ml-4">';
-
-    // Previous button
-    html += `<button onclick="loadHandles(${currentPage - 1})"
-        class="px-2 py-1 rounded text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-        ${currentPage <= 1 ? 'disabled' : ''}>&larr;</button>`;
-
-    // Page indicator
-    html += `<span class="px-2 text-gray-700">${result.page} / ${result.total_pages}</span>`;
-
-    // Next button
-    html += `<button onclick="loadHandles(${currentPage + 1})"
-        class="px-2 py-1 rounded text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-        ${currentPage >= result.total_pages ? 'disabled' : ''}>&rarr;</button>`;
-
-    html += '</div>';
-    container.innerHTML = html;
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-// Initial load
 refreshPipeline();
-loadHandles();
 </script>
 {% endblock %}
