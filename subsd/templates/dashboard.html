@@ -16,7 +16,7 @@
         </button>
     </div>
 
-    {% if spaces.is_empty() %}
+    {% if spaces.is_empty() && delegations.is_empty() %}
     <div class="card rounded-3xl flex flex-col items-center justify-center py-20">
         <div class="flex h-16 w-16 items-center justify-center rounded-2xl bg-surface-200">
             <svg class="h-8 w-8 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -24,41 +24,101 @@
             </svg>
         </div>
         <h3 class="mt-4 text-sm font-semibold text-zinc-300">No spaces yet</h3>
-        <p class="mt-1 text-sm text-zinc-500">Get started by operating a space.</p>
+        <p class="mt-1 text-sm text-zinc-500">Delegate a space to this operator to get started.</p>
         <a href="/ui/operate" class="mt-6 btn-primary rounded-xl px-6 py-2.5 text-sm font-medium text-white transition-all duration-200 flex items-center gap-2">
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-            Operate Space
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.07-9.07l4.5-4.5a4.5 4.5 0 016.364 6.364l-1.757 1.757"/></svg>
+            Get Delegation Address
         </a>
     </div>
     {% else %}
-    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {% for space in spaces %}
-        <a href="/ui/spaces/{{ space.space }}" class="group card rounded-2xl p-5 hover:bg-surface-200 transition-all duration-300 hover:border-zinc-600 hover:-translate-y-0.5">
-            <div class="flex items-center justify-between mb-4">
-                <div class="flex items-center gap-2.5">
-                    <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-500/10 group-hover:bg-orange-500/15 transition-colors">
-                        <svg class="h-4 w-4 text-accent-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"/>
-                        </svg>
+
+    {% if !delegations.is_empty() %}
+    <div class="space-y-3">
+        <div class="flex items-center gap-2">
+            <div class="h-2 w-2 rounded-full bg-amber-400 animate-pulse"></div>
+            <h2 class="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Delegated to you</h2>
+        </div>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {% for name in delegations %}
+            <div class="card rounded-2xl p-5 border-dashed border-amber-500/30">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-2.5">
+                        <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/10">
+                            <svg class="h-4 w-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"/>
+                            </svg>
+                        </div>
+                        <h3 class="text-[15px] font-bold text-zinc-100 font-mono">{{ name }}</h3>
                     </div>
-                    <h3 class="text-[15px] font-bold text-zinc-100 font-mono">{{ space.space }}</h3>
+                    <span class="badge rounded-lg px-2 py-0.5 text-[11px] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20">NEW</span>
                 </div>
-                {% if space.has_groth16 %}
-                <span class="badge rounded-lg px-2 py-0.5 text-[11px] font-semibold text-emerald-400">SNARK</span>
-                {% else if space.has_receipt %}
-                <span class="badge rounded-lg px-2 py-0.5 text-[11px] font-semibold text-blue-400">STARK</span>
-                {% endif %}
+                <p class="text-xs text-zinc-500 mb-4">This space has been delegated to your wallet but is not yet operated.</p>
+                <button onclick="operateSpace('{{ name }}')" data-btn="{{ name }}" class="w-full btn-primary rounded-xl px-4 py-2.5 text-sm font-medium text-white transition-all duration-200 flex items-center justify-center gap-2">
+                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z"/></svg>
+                    Start Operating
+                </button>
             </div>
-            <div class="flex items-center gap-5 text-sm">
-                <div><span class="text-zinc-500 text-xs">Handles</span><p class="font-bold text-zinc-200 tabular-nums">{{ space.total_handles }}</p></div>
-                <div class="h-8 w-px bg-zinc-700/50"></div>
-                <div><span class="text-zinc-500 text-xs">Committed</span><p class="font-bold text-emerald-400 tabular-nums">{{ space.committed_handles }}</p></div>
-                <div class="h-8 w-px bg-zinc-700/50"></div>
-                <div><span class="text-zinc-500 text-xs">Staged</span><p class="font-bold tabular-nums {% if space.staged_handles > 0 %}text-amber-400{% else %}text-zinc-600{% endif %}">{{ space.staged_handles }}</p></div>
-            </div>
-        </a>
-        {% endfor %}
+            {% endfor %}
+        </div>
     </div>
     {% endif %}
+
+    {% if !spaces.is_empty() %}
+    <div class="space-y-3">
+        {% if !delegations.is_empty() %}
+        <h2 class="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Active Spaces</h2>
+        {% endif %}
+        <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {% for space in spaces %}
+            <a href="/ui/spaces/{{ space.space|urlencode }}" class="group card rounded-2xl p-5 hover:bg-surface-200 transition-all duration-300 hover:border-zinc-600 hover:-translate-y-0.5">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-2.5">
+                        <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-500/10 group-hover:bg-orange-500/15 transition-colors">
+                            <svg class="h-4 w-4 text-accent-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"/>
+                            </svg>
+                        </div>
+                        <h3 class="text-[15px] font-bold text-zinc-100 font-mono">{{ space.space }}</h3>
+                    </div>
+                    {% if space.has_groth16 %}
+                    <span class="badge rounded-lg px-2 py-0.5 text-[11px] font-semibold text-emerald-400">SNARK</span>
+                    {% else if space.has_receipt %}
+                    <span class="badge rounded-lg px-2 py-0.5 text-[11px] font-semibold text-blue-400">STARK</span>
+                    {% endif %}
+                </div>
+                <div class="flex items-center gap-5 text-sm">
+                    <div><span class="text-zinc-500 text-xs">Handles</span><p class="font-bold text-zinc-200 tabular-nums">{{ space.total_handles }}</p></div>
+                    <div class="h-8 w-px bg-zinc-700/50"></div>
+                    <div><span class="text-zinc-500 text-xs">Committed</span><p class="font-bold text-emerald-400 tabular-nums">{{ space.committed_handles }}</p></div>
+                    <div class="h-8 w-px bg-zinc-700/50"></div>
+                    <div><span class="text-zinc-500 text-xs">Staged</span><p class="font-bold tabular-nums {% if space.staged_handles > 0 %}text-amber-400{% else %}text-zinc-600{% endif %}">{{ space.staged_handles }}</p></div>
+                    {% if space.pending_proofs > 0 %}
+                    <div class="h-8 w-px bg-zinc-700/50"></div>
+                    <div><span class="text-zinc-500 text-xs">Proofs</span><p class="font-bold text-violet-400 tabular-nums">{{ space.pending_proofs }}</p></div>
+                    {% endif %}
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% endif %}
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function operateSpace(name){
+    const btn=document.querySelector(`[data-btn="${name}"]`);
+    const orig=btn.innerHTML;
+    btn.disabled=true;
+    btn.innerHTML='<svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Setting up...';
+    try{
+        const res=await fetch(`/spaces/${encodeURIComponent(name)}/operate`,{method:'POST',headers:{'Content-Type':'application/json'}});
+        const j=await res.json();
+        if(res.ok){window.location.href=`/ui/spaces/${encodeURIComponent(name)}`}
+        else{btn.disabled=false;btn.innerHTML=orig;alert(j.error||'Failed to operate space')}
+    }catch(e){btn.disabled=false;btn.innerHTML=orig;alert(e.message)}
+}
+</script>
 {% endblock %}

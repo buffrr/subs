@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}Query - subsd{% endblock %}
+{% block nav_query_cls %}text-zinc-100 nav-active{% endblock %}
+{% block nav_query_icon %}text-accent-500{% endblock %}
+
+{% block content %}
+<div class="space-y-8 animate-fade-in">
+    <div>
+        <h1 class="text-2xl font-bold text-zinc-100 tracking-tight">Query</h1>
+        <p class="mt-1 text-sm text-zinc-500">Resolve handles via the certrelay network</p>
+    </div>
+
+    <div class="card rounded-3xl overflow-hidden">
+        <div class="p-6">
+            <form id="queryForm" class="flex gap-3">
+                <div class="flex-1">
+                    <input type="text" id="queryHandle" placeholder="alice@space, bob@space" class="w-full rounded-xl input-field px-4 py-3 text-sm font-mono transition-all" required autofocus>
+                </div>
+                <button type="submit" id="queryBtn" class="btn-primary rounded-xl px-6 py-3 text-sm font-medium text-white transition-all duration-200 flex items-center gap-2">
+                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+                    Resolve
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div id="errorBox" class="hidden card rounded-3xl overflow-hidden animate-fade-in">
+        <div class="p-6 flex items-start gap-3">
+            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-red-500/10">
+                <svg class="h-4 w-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
+            </div>
+            <p id="errorText" class="text-sm text-red-400"></p>
+        </div>
+    </div>
+
+    <div id="resultBox" class="hidden space-y-5 animate-fade-in"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('queryForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const handle = document.getElementById('queryHandle').value.trim();
+    if (!handle) return;
+
+    const btn = document.getElementById('queryBtn');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Resolving...';
+
+    document.getElementById('errorBox').classList.add('hidden');
+    document.getElementById('resultBox').classList.add('hidden');
+
+    try {
+        const r = await fetch('/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ handle })
+        });
+        const j = await r.json();
+
+        if (!r.ok) {
+            showError(j.error || JSON.stringify(j));
+            return;
+        }
+
+        renderZones(j);
+    } catch (e) {
+        showError(e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+    }
+});
+
+function showError(msg) {
+    document.getElementById('errorText').textContent = msg;
+    document.getElementById('errorBox').classList.remove('hidden');
+}
+
+function renderZones(zones) {
+    const box = document.getElementById('resultBox');
+    box.classList.remove('hidden');
+    if (!zones.length) { box.innerHTML = '<div class="card rounded-3xl p-6 text-sm text-zinc-500">No zones found</div>'; return; }
+    let html = '';
+    for (const z of zones) { html += renderZone(z); }
+    // Raw JSON
+    html += `<div class="card rounded-3xl overflow-hidden"><div class="border-b divider px-6 py-4 flex items-center justify-between"><h2 class="text-sm font-semibold text-zinc-300">Raw Response</h2><button onclick="document.getElementById('rawBox').classList.toggle('hidden')" class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Toggle</button></div><div id="rawBox" class="hidden p-6"><pre class="text-xs text-zinc-500 font-mono overflow-x-auto bg-surface-200 rounded-xl p-4 border border-zinc-700/50 whitespace-pre-wrap max-h-96 overflow-y-auto scrollbar-thin">${esc(JSON.stringify(zones, null, 2))}</pre></div></div>`;
+    box.innerHTML = html;
+}
+
+function renderZone(z) {
+    let h = '';
+    // Header
+    const sovBadge = sovClass(z.sovereignty);
+    h += `<div class="card rounded-3xl overflow-hidden"><div class="p-6"><div class="flex items-center gap-4"><div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-400 to-orange-600 shadow-lg shadow-orange-500/20"><svg class="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"/></svg></div><div><h2 class="text-lg font-bold text-zinc-100 font-mono">${esc(z.handle)}</h2><div class="flex items-center gap-2 mt-1"><span class="${sovBadge.cls}">${sovBadge.label}</span><span class="text-xs text-zinc-500">Anchor: #${z.anchor}</span></div></div></div>`;
+    // Script pubkey
+    h += `<div class="mt-4 pt-4 border-t divider"><div class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Script Pubkey</div><code class="text-sm text-zinc-300 font-mono break-all select-all">${esc(z.script_pubkey)}</code></div>`;
+    // Commitment
+    if (z.commitment && z.commitment.status === 'exists') {
+        const c = z.commitment.value;
+        h += '<div class="mt-4 pt-4 border-t divider space-y-2"><div class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Commitment</div>';
+        if (c.onchain) {
+            if (c.onchain.state_root) h += field('State Root', c.onchain.state_root);
+            if (c.onchain.prev_root) h += field('Prev Root', c.onchain.prev_root);
+            if (c.onchain.rolling_hash) h += field('Rolling Hash', c.onchain.rolling_hash);
+            if (c.onchain.block_height) h += field('Block Height', '#' + c.onchain.block_height);
+        }
+        if (c.receipt_hash) h += field('Receipt Hash', c.receipt_hash);
+        h += '</div>';
+    }
+    // Delegate
+    if (z.delegate && z.delegate.status === 'exists') {
+        const d = z.delegate.value;
+        h += '<div class="mt-4 pt-4 border-t divider space-y-2"><div class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Delegate</div>';
+        h += field('Script Pubkey', d.script_pubkey);
+        if (d.data) h += field('Data', d.data);
+        h += '</div>';
+    }
+    // Data
+    if (z.data) {
+        h += `<div class="mt-4 pt-4 border-t divider"><div class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Data</div><pre class="text-sm text-zinc-400 font-mono overflow-x-auto bg-surface-200 rounded-xl p-3 border border-zinc-700/50 whitespace-pre-wrap mt-1">${esc(z.data)}</pre></div>`;
+    }
+    h += '</div></div>';
+    return h;
+}
+
+function sovClass(s) {
+    if (s === 'sovereign') return { label: 'Sovereign', cls: 'rounded-lg px-2 py-0.5 text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20' };
+    if (s === 'pending') return { label: 'Pending', cls: 'rounded-lg px-2 py-0.5 text-[11px] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20' };
+    return { label: 'Dependent', cls: 'rounded-lg px-2 py-0.5 text-[11px] font-semibold text-zinc-400 bg-zinc-500/10 border border-zinc-500/20' };
+}
+
+function field(label, value) {
+    return `<div class="flex flex-col gap-1"><span class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">${esc(label)}</span><code class="text-sm text-zinc-300 font-mono break-all select-all">${esc(String(value))}</code></div>`;
+}
+
+function esc(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+</script>
+{% endblock %}

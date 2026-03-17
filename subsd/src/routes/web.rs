@@ -15,6 +15,7 @@ use crate::state::AppState;
 #[template(path = "dashboard.html")]
 pub struct DashboardTemplate {
     pub spaces: Vec<SpaceStatus>,
+    pub delegations: Vec<String>,
 }
 
 #[derive(Template)]
@@ -32,6 +33,10 @@ pub struct OperateTemplate {
 pub struct CertsTemplate;
 
 #[derive(Template)]
+#[template(path = "query.html")]
+pub struct QueryTemplate;
+
+#[derive(Template)]
 #[template(path = "settings.html")]
 pub struct SettingsTemplate;
 
@@ -41,6 +46,13 @@ pub struct SpaceTemplate {
     pub space: SpaceStatus,
 }
 
+#[derive(Template)]
+#[template(path = "handle.html")]
+pub struct HandleTemplate {
+    pub space: String,
+    pub handle: String,
+}
+
 /// GET / - Dashboard
 pub async fn dashboard(State(state): State<AppState>) -> Html<String> {
     // Load all spaces from disk first
@@ -48,8 +60,19 @@ pub async fn dashboard(State(state): State<AppState>) -> Html<String> {
 
     let status = state.operator.status().await.unwrap_or_default();
 
+    // Get delegated spaces not yet operated
+    let delegations = state
+        .operator
+        .list_delegated_spaces()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
+
     let template = DashboardTemplate {
         spaces: status.spaces,
+        delegations,
     };
 
     Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
@@ -83,6 +106,12 @@ pub async fn certs_page() -> Html<String> {
     Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
 }
 
+/// GET /ui/query - Query page
+pub async fn query_page() -> Html<String> {
+    let template = QueryTemplate;
+    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+}
+
 /// GET /ui/settings - Settings page
 pub async fn settings_page() -> Html<String> {
     let template = SettingsTemplate;
@@ -110,5 +139,13 @@ pub async fn space_page(
     };
 
     let template = SpaceTemplate { space: status };
+    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+}
+
+/// GET /ui/spaces/{space}/handles/{handle} - Handle detail page
+pub async fn handle_page(
+    Path((space, handle)): Path<(String, String)>,
+) -> Html<String> {
+    let template = HandleTemplate { space, handle };
     Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
 }

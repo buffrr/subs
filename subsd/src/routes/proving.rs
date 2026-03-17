@@ -429,3 +429,57 @@ pub async fn poll_prover(
         }
     }
 }
+
+/// GET /spaces/:space/proving/estimate - Get proving time estimate from configured prover
+pub async fn get_estimate(
+    State(state): State<AppState>,
+    Path(space): Path<String>,
+) -> Result<Response, Response> {
+    let space_label = space
+        .parse()
+        .map_err(|e| json_error(StatusCode::BAD_REQUEST, format!("invalid space: {}", e)))?;
+
+    let prover_endpoint = state
+        .config
+        .prover_endpoint()
+        .map_err(|e| json_error(StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| json_error(StatusCode::BAD_REQUEST, "prover_endpoint not configured"))?;
+
+    let request = state
+        .operator
+        .get_next_proving_request(&space_label)
+        .await
+        .map_err(|e| json_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    let Some(request) = request else {
+        return Err(json_error(StatusCode::NOT_FOUND, "no pending proving request"));
+    };
+
+    let request_bytes = borsh::to_vec(&request)
+        .map_err(|e| json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("serialize: {}", e)))?;
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/estimate", prover_endpoint.trim_end_matches('/'));
+
+    let response = client
+        .post(&url)
+        .header("Content-Type", "application/octet-stream")
+        .body(request_bytes)
+        .send()
+        .await
+        .map_err(|e| json_error(StatusCode::BAD_GATEWAY, format!("prover request failed: {}", e)))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(json_error(StatusCode::BAD_GATEWAY, format!("prover returned {}: {}", status, body)));
+    }
+
+    // Forward the JSON response from the prover as-is (arbitrary key/values)
+    let estimate: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| json_error(StatusCode::BAD_GATEWAY, format!("invalid prover response: {}", e)))?;
+
+    Ok((StatusCode::OK, Json(estimate)).into_response())
+}

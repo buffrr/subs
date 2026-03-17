@@ -111,10 +111,39 @@ pub struct HandlesQuery {
     pub page: usize,
     #[serde(default = "default_per_page")]
     pub per_page: usize,
+    pub search: Option<String>,
+    pub filter: Option<String>,
 }
 
 fn default_page() -> usize { 1 }
 fn default_per_page() -> usize { 20 }
+
+/// GET /spaces/:space/handles/:handle - Get a single handle by name
+pub async fn get_handle(
+    State(state): State<AppState>,
+    Path((space, handle)): Path<(String, String)>,
+) -> Result<Json<subs::HandleInfo>, Response> {
+    let space = space
+        .parse()
+        .map_err(|e| json_error(StatusCode::BAD_REQUEST, format!("invalid space: {}", e)))?;
+
+    state
+        .operator
+        .load_or_create_space(&space)
+        .await
+        .map_err(|e| json_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    let handle_info = state
+        .operator
+        .get_handle_info(&space, &handle)
+        .await
+        .map_err(|e| json_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    match handle_info {
+        Some(h) => Ok(Json(h)),
+        None => Err(json_error(StatusCode::NOT_FOUND, "handle not found")),
+    }
+}
 
 /// GET /spaces/:space/handles - List handles with pagination
 pub async fn list_handles(
@@ -135,7 +164,7 @@ pub async fn list_handles(
 
     state
         .operator
-        .list_handles(&space, query.page, query.per_page)
+        .list_handles(&space, query.page, query.per_page, query.search, query.filter)
         .await
         .map(Json)
         .map_err(|e| json_error(StatusCode::INTERNAL_SERVER_ERROR, e))

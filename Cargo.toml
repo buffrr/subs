@@ -3,11 +3,14 @@ resolver = "2"
 members = ["subs", "prover", "types", "subsd", "examples/registry-server"]
 
 [workspace.dependencies]
-libveritas = { git = "https://github.com/spacesprotocol/libveritas.git", features = ["elf"] }
-libveritas_zk = { git = "https://github.com/spacesprotocol/libveritas.git"}
-libveritas_testutil = { git = "https://github.com/spacesprotocol/libveritas.git" }
+libveritas = { git = "http://github.com/spacesprotocol/libveritas.git", features = ["elf"] }
+libveritas_zk = { git = "http://github.com/spacesprotocol/libveritas.git"}
+libveritas_testutil = { git = "http://github.com/spacesprotocol/libveritas.git" }
 subs-types = { path = "types" }
 subs-prover = { path = "prover" }
+spacedb = { git = "https://github.com/spacesprotocol/spacedb.git", version = "0.0.12" }
+relay = { path = "/Users/adams/RustroverProjects/itsparis/certrelay/relay" }
+fabric = { path = "/Users/adams/RustroverProjects/itsparis/certrelay/fabric" }
 
 
 # Always optimize; building and running the guest takes much longer without optimization.

@@ -62,6 +62,9 @@ pub enum JobRequest {
 pub struct ServerState {
     jobs: RwLock<HashMap<String, Job>>,
     job_sender: mpsc::Sender<String>,
+    /// Calibration data from startup benchmark.
+    /// None if calibration hasn't run or failed.
+    calibration: RwLock<Option<subs_types::CalibrationInfo>>,
 }
 
 impl ServerState {
@@ -69,6 +72,7 @@ impl ServerState {
         Self {
             jobs: RwLock::new(HashMap::new()),
             job_sender,
+            calibration: RwLock::new(None),
         }
     }
 }
@@ -111,6 +115,31 @@ pub async fn run_server(port: u16) -> anyhow::Result<()> {
     // Create shared state
     let state = Arc::new(ServerState::new(tx));
 
+    // Calibrate proving throughput on startup
+    tracing::info!("Calibrating proving throughput...");
+    let calibrate_state = state.clone();
+    let calibrate_handle = tokio::task::spawn_blocking(move || {
+        let prover = Prover::new();
+        prover.calibrate()
+    });
+    match calibrate_handle.await {
+        Ok(Ok(info)) => {
+            tracing::info!(
+                "Calibration complete: {:.2}s per segment at po2={}, {:.0} cycles/sec",
+                info.seconds_per_segment,
+                info.calibration_po2,
+                info.cycles_per_sec,
+            );
+            *calibrate_state.calibration.write().await = Some(info);
+        }
+        Ok(Err(e)) => {
+            tracing::warn!("Calibration failed (estimates will be unavailable): {}", e);
+        }
+        Err(e) => {
+            tracing::warn!("Calibration task panicked: {}", e);
+        }
+    }
+
     // Spawn the worker
     let worker_state = state.clone();
     tokio::spawn(async move {
@@ -121,9 +150,10 @@ pub async fn run_server(port: u16) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/prove", post(submit_prove))
+        .route("/estimate", post(submit_estimate))
         .route("/compress", post(submit_compress))
-        .route("/jobs/{job_id}", get(get_job_status))
-        .route("/jobs/{job_id}/receipt", get(get_job_receipt))
+        .route("/jobs/:job_id", get(get_job_status))
+        .route("/jobs/:job_id/receipt", get(get_job_receipt))
         .layer(TraceLayer::new_for_http())
         .layer(
             CorsLayer::new()
@@ -208,6 +238,52 @@ async fn submit_prove(
         .into_response()
 }
 
+/// Estimate cycle count and proving time for a request (binary borsh-encoded ProvingRequest)
+async fn submit_estimate(
+    State(state): State<Arc<ServerState>>,
+    body: axum::body::Bytes,
+) -> impl IntoResponse {
+    let request: ProvingRequest = match borsh::from_slice(&body) {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: format!("Invalid proving request: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let calibration = state.calibration.read().await.clone();
+
+    // Execute in a blocking task since it runs the guest program
+    let result = tokio::task::spawn_blocking(move || {
+        let prover = Prover::new();
+        prover.estimate(&request, calibration.as_ref())
+    })
+    .await;
+
+    match result {
+        Ok(Ok(estimate)) => (StatusCode::OK, Json(estimate)).into_response(),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Estimate failed: {}", e),
+            }),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Task panicked: {}", e),
+            }),
+        )
+            .into_response(),
+    }
+}
+
 /// Submit a compression request (binary borsh-encoded CompressInput)
 async fn submit_compress(
     State(state): State<Arc<ServerState>>,
@@ -289,16 +365,17 @@ async fn get_job_status(
     }
 }
 
-/// Get job receipt (only available when complete)
+/// Get job receipt (only available when complete).
+/// Removes the job after the receipt is returned so it is only pulled once.
 async fn get_job_receipt(
     State(state): State<Arc<ServerState>>,
     Path(job_id): Path<String>,
 ) -> impl IntoResponse {
-    let jobs = state.jobs.read().await;
-
-    match jobs.get(&job_id) {
-        Some(job) => {
-            if job.status != JobStatus::Complete {
+    // First check status with a read lock
+    {
+        let jobs = state.jobs.read().await;
+        match jobs.get(&job_id) {
+            Some(job) if job.status != JobStatus::Complete => {
                 return (
                     StatusCode::BAD_REQUEST,
                     Json(ErrorResponse {
@@ -307,26 +384,43 @@ async fn get_job_receipt(
                 )
                     .into_response();
             }
+            None => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(ErrorResponse {
+                        error: "Job not found".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+            _ => {}
+        }
+    }
 
-            match &job.receipt {
-                Some(receipt) => (
+    // Remove the job and return the receipt
+    let mut jobs = state.jobs.write().await;
+    match jobs.remove(&job_id) {
+        Some(job) => match job.receipt {
+            Some(receipt) => {
+                tracing::info!("Job {} receipt pulled, removing job", job_id);
+                (
                     StatusCode::OK,
                     [(
                         axum::http::header::CONTENT_TYPE,
                         "application/octet-stream",
                     )],
-                    receipt.clone(),
+                    receipt,
                 )
-                    .into_response(),
-                None => (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: "Receipt not available".to_string(),
-                    }),
-                )
-                    .into_response(),
+                    .into_response()
             }
-        }
+            None => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Receipt not available".to_string(),
+                }),
+            )
+                .into_response(),
+        },
         None => (
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {

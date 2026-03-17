@@ -43,7 +43,7 @@ struct Cli {
     server: bool,
 
     /// Server port (for --server mode)
-    #[arg(long, default_value = "7778")]
+    #[arg(long, default_value = "8888")]
     server_port: u16,
 
     /// Run as a worker that polls subsd for proving requests (auto-discovers all spaces)
@@ -82,6 +82,15 @@ enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Benchmark: estimate proving cost for inserting handles into a tree
+    Bench {
+        /// Number of existing handles in the tree
+        #[arg(long, default_value = "10000")]
+        existing: usize,
+        /// Number of new handles to insert
+        #[arg(long, default_value = "100")]
+        insert: usize,
+    },
 }
 
 #[tokio::main]
@@ -114,11 +123,15 @@ async fn main() -> Result<()> {
             let receipt = compress(&compress_input)?;
             write_output(output, &receipt)?;
         }
+        Some(Commands::Bench { existing, insert }) => {
+            run_bench(existing, insert)?;
+        }
         None => {
             eprintln!("Usage: subs-prover --server    (run as HTTP server)");
             eprintln!("       subs-prover --worker    (run as polling daemon)");
             eprintln!("       subs-prover prove       (prove single request)");
             eprintln!("       subs-prover compress    (compress to SNARK)");
+            eprintln!("       subs-prover bench       (benchmark proving cost)");
             eprintln!();
             eprintln!("Run with --help for more options.");
             std::process::exit(1);
@@ -173,6 +186,53 @@ fn compress(input: &CompressInput) -> Result<Vec<u8>> {
     result
 }
 
+fn run_bench(existing: usize, insert: usize) -> Result<()> {
+    eprintln!("Building tree with {} existing handles, {} inserts...", existing, insert);
+    let start = std::time::Instant::now();
+    let request = subs_prover::build_bench_request(existing, insert)?;
+    eprintln!("Request built in {:.2}s", start.elapsed().as_secs_f64());
+
+    // Calibrate first
+    eprintln!("\nCalibrating...");
+    let prover = Prover::new();
+    let calibration = match prover.calibrate() {
+        Ok(info) => {
+            eprintln!(
+                "Calibration: {:.2}s per segment at po2={}\n",
+                info.seconds_per_segment, info.calibration_po2
+            );
+            Some(info)
+        }
+        Err(e) => {
+            eprintln!("Calibration failed: {}\n", e);
+            None
+        }
+    };
+
+    // Run estimate
+    eprintln!("Estimating proof for {} handles inserted into tree of {}...", insert, existing);
+    let estimate = prover.estimate(&request, calibration.as_ref())?;
+
+    eprintln!("\n=== Estimate ===");
+    eprintln!("Total user cycles:    {}", estimate.total_cycles);
+    eprintln!("Total proving cycles: {} (padded)", estimate.total_proving_cycles);
+    eprintln!("Segments:             {}", estimate.segments);
+    for (i, seg) in estimate.segment_details.iter().enumerate() {
+        let time_str = seg.estimated_seconds
+            .map(|s| format!("{:.2}s", s))
+            .unwrap_or_else(|| "n/a".into());
+        eprintln!(
+            "  Segment {}: {} user cycles, po2={}, est. {}",
+            i, seg.cycles, seg.po2, time_str
+        );
+    }
+    if let Some(total) = estimate.estimated_seconds {
+        eprintln!("\nEstimated total proving time: {:.1}s", total);
+    }
+
+    Ok(())
+}
+
 /// Request type constants for binary fulfill payload
 const REQUEST_TYPE_STEP: u8 = 0;
 const REQUEST_TYPE_FOLD: u8 = 1;
@@ -197,6 +257,15 @@ async fn run_worker(base_url: &str, poll_interval: u64) -> Result<()> {
     eprintln!("Prover worker started");
     eprintln!("Connecting to: {}", base_url);
     eprintln!("Poll interval: {}s", poll_interval);
+
+    eprintln!("Calibrating proving throughput...");
+    match prover.calibrate() {
+        Ok(info) => eprintln!(
+            "Calibration complete: {:.2}s per segment at po2={}, {:.0} cycles/sec",
+            info.seconds_per_segment, info.calibration_po2, info.cycles_per_sec
+        ),
+        Err(e) => eprintln!("Calibration failed: {}", e),
+    }
     eprintln!();
 
     loop {

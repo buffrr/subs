@@ -12,6 +12,7 @@
 //! subsd --test-rig --test-rig-dir ./testdata
 //! ```
 
+mod background;
 mod config;
 mod routes;
 mod state;
@@ -94,7 +95,7 @@ async fn main() -> Result<()> {
     #[cfg(feature = "test-rig")]
     {
         if cli.test_rig {
-            let handle = run_with_test_rig(cli).await?;
+            let mut handle = run_with_test_rig(cli).await?;
             // Gracefully stop bitcoind so it flushes blocks to disk
             if let Err(e) = handle.stop().await {
                 tracing::warn!("Failed to stop bitcoind cleanly: {}", e);
@@ -209,10 +210,15 @@ async fn run_with_test_rig(cli: Cli) -> Result<testrig::TestRigHandle> {
     let bitcoin_url = handle.bitcoin_rpc_url().to_string();
     run_server_with_testrig(operator, config, cli.port, spaced_url, bitcoin_url, certrelay_url, handle.clone()).await?;
 
-    Ok(Arc::try_unwrap(handle).unwrap_or_else(|arc| {
-        // This shouldn't happen, but if it does, we can't return the handle
-        panic!("TestRigHandle still has multiple references");
-    }))
+    // Background tasks (proving loop) hold AppState clones with Arc refs.
+    // On shutdown just leak them — the process is exiting anyway.
+    match Arc::try_unwrap(handle) {
+        Ok(h) => Ok(h),
+        Err(_) => {
+            tracing::info!("Shutting down with process exit");
+            std::process::exit(0);
+        }
+    }
 }
 
 async fn run_server(
@@ -243,6 +249,8 @@ async fn run_server_with_testrig(
 }
 
 async fn run_server_inner(state: AppState, port: u16) -> Result<()> {
+    // Start background proving loop
+    background::spawn_proving_loop(state.clone());
 
     // Build router
     let app = routes::router()

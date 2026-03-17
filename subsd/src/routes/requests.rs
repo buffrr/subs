@@ -88,3 +88,66 @@ pub async fn generate_request(
         private_key,
     }))
 }
+
+#[derive(Deserialize)]
+pub struct BulkGenerateBody {
+    /// Space name (e.g. "@test10000")
+    pub space: String,
+    /// Number of handles to generate and stage
+    pub count: usize,
+    /// Optional prefix for handle names (default: "h")
+    #[serde(default = "default_prefix")]
+    pub prefix: String,
+}
+
+fn default_prefix() -> String {
+    "h".to_string()
+}
+
+#[derive(Serialize)]
+pub struct BulkGenerateResponse {
+    pub staged: usize,
+}
+
+/// POST /requests/bulk-generate - Generate and stage N handles with random keys
+pub async fn bulk_generate(
+    State(state): State<AppState>,
+    Json(body): Json<BulkGenerateBody>,
+) -> Result<Json<BulkGenerateResponse>, Response> {
+    use bitcoin::key::Secp256k1;
+    use bitcoin::secp256k1::rand;
+    use bitcoin::{Network, Address, XOnlyPublicKey};
+
+    if body.count == 0 {
+        return Err(json_error(StatusCode::BAD_REQUEST, "count must be > 0"));
+    }
+
+    let secp = Secp256k1::new();
+    let mut requests = Vec::with_capacity(body.count);
+
+    for i in 0..body.count {
+        let handle_str = format!("{}{}{}", body.prefix, i, body.space);
+        let handle: libveritas::sname::SName = handle_str
+            .parse()
+            .map_err(|e| json_error(StatusCode::BAD_REQUEST, format!("invalid handle {}: {}", handle_str, e)))?;
+
+        let keypair = bitcoin::secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
+        let (xonly, _parity) = XOnlyPublicKey::from_keypair(&keypair);
+        let address = Address::p2tr(&secp, xonly, None, Network::Bitcoin);
+        let script_pubkey = hex::encode(address.script_pubkey().as_bytes());
+
+        requests.push(HandleRequest {
+            handle,
+            script_pubkey,
+        });
+    }
+
+    let count = requests.len();
+    state
+        .operator
+        .add_requests(requests)
+        .await
+        .map_err(|e| json_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(Json(BulkGenerateResponse { staged: count }))
+}

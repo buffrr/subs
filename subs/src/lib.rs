@@ -7,6 +7,7 @@ use spacedb::NodeHasher;
 use spaces_protocol::bitcoin::ScriptBuf;
 use spaces_protocol::slabel::SLabel;
 use spacedb::Sha256Hasher as sha256;
+use libveritas::cert::HandleOut;
 use libveritas::sname::{Label, SName};
 pub extern crate spaces_protocol;
 
@@ -25,7 +26,7 @@ pub use subs_types::{ProvingRequest, CompressInput};
 
 // Re-export libveritas types for certificate handling
 pub use libveritas::cert::Certificate;
-pub use spaces_ptr::RootAnchor;
+pub use spaces_nums::RootAnchor;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HandleRequest {
@@ -67,8 +68,12 @@ impl Batch {
             let subspace_hash = sha256::hash(entry.sub_label.as_slabel().as_ref());
             bytes.extend_from_slice(&subspace_hash);
 
-            let script_hash = sha256::hash(entry.script_pubkey.as_bytes());
-            bytes.extend_from_slice(&script_hash);
+            let handle_out = HandleOut {
+                name: entry.sub_label.as_slabel().clone(),
+                spk: entry.script_pubkey.clone(),
+            };
+            let value_hash = sha256::hash(&handle_out.to_vec());
+            bytes.extend_from_slice(&value_hash);
         }
 
         bytes

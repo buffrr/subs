@@ -11,7 +11,7 @@ use std::{fs, io};
 
 use anyhow::anyhow;
 use bitcoin::ScriptBuf;
-use libveritas::cert::{Certificate, HandleSubtree, Signature, Witness};
+use libveritas::cert::{Certificate, HandleOut, HandleSubtree, Signature, Witness};
 use libveritas::constants::{FOLD_ID, STEP_ID};
 use libveritas::sname::{Label, NameLike, SName};
 use libveritas_zk::guest::Commitment as ZkCommitment;
@@ -130,6 +130,7 @@ pub struct SpaceStatus {
     pub total_handles: usize,
     pub staged_handles: usize,
     pub committed_handles: usize,
+    pub pending_proofs: usize,
     pub has_receipt: bool,
     pub has_groth16: bool,
 }
@@ -228,9 +229,11 @@ impl LocalSpace {
             .subspace()
             .ok_or_else(|| anyhow!("handle must have subspace"))?;
         let key = Sha256Hasher::hash(subspace.as_slabel().as_ref());
-        let spk = snap
+        let value = snap
             .get(&key)?
             .ok_or_else(|| anyhow!("handle '{}' not found", handle))?;
+        let handle_out = HandleOut::from_slice(&value)
+            .map_err(|e| anyhow!("invalid handle tree entry for '{}': {}", handle, e))?;
 
         let inclusion_proof = snap
             .prove(&[key], ProofType::Standard)
@@ -238,7 +241,7 @@ impl LocalSpace {
 
         Ok(LocalHandleProof {
             subject: handle.clone(),
-            script_pubkey: spk,
+            script_pubkey: handle_out.spk.into_bytes(),
             inclusion_proof,
         })
     }
@@ -251,12 +254,15 @@ impl LocalSpace {
     pub async fn status(&self) -> anyhow::Result<SpaceStatus> {
         let staged = self.storage.staged_count().await?;
         let committed = self.storage.committed_handle_count().await?;
+        let commitments = self.storage.list_commitments().await?;
+        let pending_proofs = count_pending_proofs(&commitments);
         Ok(SpaceStatus {
             space: self.name.clone(),
-            commitments: self.storage.commitment_count().await?,
+            commitments: commitments.len(),
             total_handles: staged + committed,
             staged_handles: staged,
             committed_handles: committed,
+            pending_proofs,
             has_receipt: self.storage.get_tip_receipt_id().await?.is_some(),
             has_groth16: self.storage.get_tip_groth16_id().await?.is_some(),
         })
@@ -281,8 +287,11 @@ impl LocalSpace {
         let db_result: Option<SkippedEntry> = spawn_blocking(move || {
             let db = db.lock().unwrap();
             let mut reader = db.begin_read()?;
-            if let Some(existing) = reader.get(&Sha256Hasher::hash(&sub_label_key))? {
-                let reason = if existing != spk_clone {
+            if let Some(existing_bytes) = reader.get(&Sha256Hasher::hash(&sub_label_key))? {
+                let reason = if HandleOut::from_slice(&existing_bytes)
+                    .map(|h| h.spk.as_bytes() != spk_clone.as_slice())
+                    .unwrap_or(true)
+                {
                     SkipReason::AlreadyCommittedDifferentSpk
                 } else {
                     SkipReason::AlreadyCommitted
@@ -423,9 +432,13 @@ impl LocalSpace {
                     let db = db.lock().unwrap();
                     let mut tx = db.begin_write()?;
                     for e in entries {
+                        let handle_out = HandleOut {
+                            name: e.sub_label.as_slabel().clone(),
+                            spk: e.script_pubkey.clone(),
+                        };
                         tx = tx.insert(
                             Sha256Hasher::hash(e.sub_label.as_slabel().as_ref()),
-                            e.script_pubkey.to_bytes(),
+                            handle_out.to_vec(),
                         )?;
                     }
                     tx.commit()?;
@@ -461,9 +474,13 @@ impl LocalSpace {
                     let db = db.lock().unwrap();
                     let mut tx = db.begin_write()?;
                     for e in &entries {
+                        let handle_out = HandleOut {
+                            name: e.sub_label.as_slabel().clone(),
+                            spk: e.script_pubkey.clone(),
+                        };
                         tx = tx.insert(
                             Sha256Hasher::hash(e.sub_label.as_slabel().as_ref()),
-                            e.script_pubkey.to_bytes(),
+                            handle_out.to_vec(),
                         )?;
                     }
                     tx.commit()?;
@@ -486,6 +503,56 @@ impl LocalSpace {
                 })
             }
         }
+    }
+
+    /// Rollback the last local commitment.
+    ///
+    /// Rolls back spacedb first (source of truth), then cleans up SQLite.
+    /// Safe against crashes: startup consistency check will finish cleanup
+    /// if we crash between spacedb rollback and SQLite cleanup.
+    pub async fn rollback_local(&self) -> anyhow::Result<()> {
+        let last = self.storage.get_last_commitment().await?
+            .ok_or_else(|| anyhow!("no commitments to rollback"))?;
+        if last.commit_txid.is_some() {
+            return Err(anyhow!("cannot rollback: commitment already broadcast"));
+        }
+
+        let mut root_bytes = [0u8; 32];
+        hex::decode_to_slice(&last.root, &mut root_bytes)
+            .map_err(|e| anyhow!("invalid root: {}", e))?;
+
+        // Step 1: Rollback spacedb (source of truth)
+        let db = self.db.clone();
+        spawn_blocking(move || {
+            let db = db.lock().unwrap();
+            rollback_local_commitment(&db, root_bytes)
+        })
+        .await??;
+
+        // Step 2: Clean up SQLite
+        self.storage.rollback_last_commitment().await?;
+
+        log::info!("[{}] Rolled back last commitment (idx {})", self.name, last.idx);
+        Ok(())
+    }
+
+    /// Check consistency between spacedb and SQLite on startup.
+    /// If spacedb was rolled back but SQLite wasn't (crash during rollback),
+    /// finishes the SQLite cleanup.
+    pub async fn check_consistency(&self) -> anyhow::Result<()> {
+        let db = self.db.clone();
+        let spacedb_root = spawn_blocking(move || {
+            let db = db.lock().unwrap();
+            let mut snap = db.begin_read()?;
+            let root = snap.compute_root()?;
+            Ok::<_, anyhow::Error>(hex::encode(root))
+        })
+        .await??;
+
+        if self.storage.cleanup_orphaned_commitment(&spacedb_root).await? {
+            log::warn!("[{}] Cleaned up orphaned commitment (partial rollback recovery)", self.name);
+        }
+        Ok(())
     }
 
     /// Look up a handle in SpaceDB
@@ -594,13 +661,20 @@ impl LocalSpace {
             });
         }
 
-        let receipt_id = if prefer_compressed {
+        // idx 1: only has a step receipt (no fold needed)
+        // idx 2+: must use the aggregate (folded) receipt, never fall back to step
+        let receipt_id = if commitment.idx <= 1 {
+            if prefer_compressed {
+                commitment.aggregate_groth16_id
+                    .or(commitment.step_receipt_id)
+            } else {
+                commitment.step_receipt_id
+            }
+        } else if prefer_compressed {
             commitment.aggregate_groth16_id
                 .or(commitment.aggregate_receipt_id)
-                .or(commitment.step_receipt_id)
         } else {
             commitment.aggregate_receipt_id
-                .or(commitment.step_receipt_id)
         };
 
         let receipt_id = receipt_id
@@ -920,6 +994,33 @@ impl LocalSpace {
             self.save_step_receipt(commitment_id, receipt_bytes).await
         }
     }
+
+    /// Save a proving estimate for a commitment (JSON-serialized EstimateResult).
+    pub async fn save_estimate(
+        &self,
+        commitment_id: i64,
+        estimate_json: &str,
+    ) -> anyhow::Result<()> {
+        self.storage.update_commitment_estimate(commitment_id, estimate_json).await
+    }
+}
+
+/// Count pending proofs across commitments.
+///
+/// - idx 0: no proof needed (genesis)
+/// - idx 1: step only (1 proof)
+/// - idx 2+: step + fold (2 proofs each)
+pub fn count_pending_proofs(commitments: &[crate::storage::Commitment]) -> usize {
+    let mut count = 0;
+    for c in commitments.iter().skip(1) {
+        if c.step_receipt_id.is_none() {
+            count += 1;
+        }
+        if c.idx >= 2 && c.aggregate_receipt_id.is_none() {
+            count += 1;
+        }
+    }
+    count
 }
 
 #[cfg(test)]
@@ -999,8 +1100,12 @@ mod tests {
         let expected_hash = Sha256Hasher::hash(label.as_slabel().as_ref());
         assert_eq!(entries[0].handle, expected_hash);
 
-        let expected_spk_hash = Sha256Hasher::hash(spk.as_bytes());
-        assert_eq!(entries[0].script_pubkey, expected_spk_hash);
+        let handle_out = HandleOut {
+            name: label.as_slabel().clone(),
+            spk: spk.clone(),
+        };
+        let expected_value_hash = Sha256Hasher::hash(&handle_out.to_vec());
+        assert_eq!(entries[0].value_hash, expected_value_hash);
     }
 
     #[tokio::test]
@@ -1105,7 +1210,8 @@ mod tests {
         let tip = local_space.get_tree_root().await.unwrap();
         let stored = local_space.lookup_handle_in_tree(&label, Some(tip)).await.unwrap();
         assert!(stored.is_some());
-        assert_eq!(stored.unwrap(), vec![0x01; 25]);
+        let handle_out = HandleOut::from_slice(&stored.unwrap()).unwrap();
+        assert_eq!(handle_out.spk.as_bytes(), &[0x01; 25]);
     }
 
     #[tokio::test]
@@ -1293,10 +1399,38 @@ fn get_snapshot_for_tip(db: &Database<Sha256Hasher>, tip: [u8;32]) -> anyhow::Re
     for snapshot in db.iter() {
         let mut snap = snapshot?;
         let root = snap.compute_root()
-            .map_err(|e| anyhow!("could not compute root for snapshot"))?;
+            .map_err(|e| anyhow!("could not compute root for snapshot: {}", e))?;
         if root == tip {
             return Ok(snap);
         }
     }
     Err(anyhow!("no snapshot for {}", hex::encode(&tip)))
+}
+
+fn rollback_local_commitment(db: &Database<Sha256Hasher>, root: [u8; 32]) -> anyhow::Result<()> {
+    let mut found = false;
+
+    for snapshot in db.iter() { // newest -> oldest
+        let mut snap = snapshot?;
+        let current_root = snap.compute_root()
+            .map_err(|e| anyhow!("could not compute root for snapshot: {e}"))?;
+
+        if found {
+            // This is the first snapshot older than the target
+            snap.rollback()?;
+            return Ok(());
+        }
+
+        if current_root == root {
+            found = true;
+        }
+    }
+
+    if found {
+        // Root was the oldest snapshot, nothing before it
+        db.reset()?;
+        return Ok(());
+    }
+
+    Err(anyhow!("rollback: no snapshot for {}", hex::encode(&root)))
 }

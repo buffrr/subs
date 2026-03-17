@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use libveritas::cert::{LeafKind, LiveWitness, LocalLeafKind, LocalWitness, Witness};
+use libveritas::cert::Witness;
 use libveritas::sname::SName;
 use spaces_client::rpc::{DelegateParams, RpcClient, RpcWalletRequest, RpcWalletTxBuilder};
 use spaces_client::wallets::WalletResponse;
@@ -121,8 +121,7 @@ fn test_sname(s: &str) -> SName {
 fn assert_temp_cert(cert: &libveritas::cert::Certificate, expect_exclusion: bool) {
     assert!(cert.is_temporary(), "expected temporary certificate");
     let has_exclusion = match &cert.witness {
-        Witness::Local(LocalWitness::Leaf { kind: LocalLeafKind::Temporary { exclusion, .. }, .. }) => exclusion.is_some(),
-        Witness::Live { inner: LiveWitness::Leaf { kind: LeafKind::Temporary { exclusion, .. }, .. }, .. } => exclusion.is_some(),
+        Witness::Leaf { handles, signature: Some(_), .. } => !handles.0.is_empty(),
         _ => false,
     };
     assert_eq!(has_exclusion, expect_exclusion, "exclusion proof mismatch");

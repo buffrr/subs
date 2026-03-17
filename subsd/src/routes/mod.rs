@@ -6,6 +6,7 @@ pub mod config;
 pub mod console;
 mod error;
 pub mod proving;
+pub mod query;
 pub mod registry;
 pub mod requests;
 pub mod status;
@@ -28,20 +29,26 @@ pub fn router() -> Router<AppState> {
         .route("/ui/operate", get(web::operate_page))
         .route("/ui/requests", get(web::requests_page))
         .route("/ui/certs", get(web::certs_page))
+        .route("/ui/query", get(web::query_page))
         .route("/ui/settings", get(web::settings_page))
         .route("/ui/spaces/:space", get(web::space_page))
+        .route("/ui/spaces/:space/handles/:handle", get(web::handle_page))
         // API: Status & Spaces
         .route("/status", get(status::get_status))
         .route("/spaces", get(status::list_spaces))
         .route("/spaces/:space", get(status::get_space_status))
         .route("/spaces/:space/operate", post(status::operate_space))
         .route("/spaces/:space/handles", get(status::list_handles))
+        .route("/spaces/:space/handles/:handle", get(status::get_handle))
         // API: Handle requests
         .route("/requests", post(requests::add_requests))
         .route("/requests/generate", post(requests::generate_request))
+        .route("/requests/bulk-generate", post(requests::bulk_generate))
         // API: Commits & Fees
         .route("/fees", get(commits::get_fees))
         .route("/spaces/:space/commit", post(commits::commit_local))
+        .route("/spaces/:space/rollback-local", post(commits::rollback_local))
+        .route("/spaces/:space/park", post(commits::park_handles))
         .route("/spaces/:space/broadcast", post(commits::broadcast))
         .route("/spaces/:space/commit/status", get(commits::get_commit_status))
         .route("/spaces/:space/pipeline", get(commits::get_pipeline_status))
@@ -51,8 +58,11 @@ pub fn router() -> Router<AppState> {
         .route("/spaces/:space/proving/fulfill", post(proving::fulfill))
         .route("/spaces/:space/proving/push", post(proving::push_to_prover))
         .route("/spaces/:space/proving/poll", post(proving::poll_prover))
+        .route("/spaces/:space/proving/estimate", get(proving::get_estimate))
         .route("/spaces/:space/compress", get(proving::get_compress_input))
         .route("/spaces/:space/snark", post(proving::save_snark))
+        // API: Query
+        .route("/query", post(query::resolve_handle))
         // API: Certificates
         .route("/certs/:handle", get(certs::issue_cert))
         .route("/certs/verify", post(certs::verify_cert))
