@@ -659,6 +659,21 @@ impl Storage {
         .await?
     }
 
+    /// Count parked handles
+    pub async fn parked_count(&self) -> anyhow::Result<usize> {
+        let conn = self.conn.clone();
+        spawn_blocking(move || {
+            let conn = conn.lock().unwrap();
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM handles WHERE commitment_root IS NULL AND parked = 1",
+                [],
+                |row| row.get(0),
+            )?;
+            Ok(count as usize)
+        })
+        .await?
+    }
+
     /// Count committed handles (commitment_root IS NOT NULL)
     pub async fn committed_handle_count(&self) -> anyhow::Result<usize> {
         let conn = self.conn.clone();
@@ -776,6 +791,48 @@ impl Storage {
                     )
                 };
                 let mut all: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(val)];
+                for p in &filter_params {
+                    all.push(Box::new(p.clone()));
+                }
+                let refs: Vec<&dyn rusqlite::types::ToSql> = all.iter().map(|b| b.as_ref()).collect();
+                let count = conn.execute(&sql, refs.as_slice())?;
+                Ok(count)
+            }
+        })
+        .await?
+    }
+
+    /// Remove staged handles (not committed)
+    pub async fn remove_staged_handles(
+        &self,
+        names: &[String],
+        search: Option<String>,
+        filter: Option<String>,
+    ) -> anyhow::Result<usize> {
+        let conn = self.conn.clone();
+        let names = names.to_vec();
+        spawn_blocking(move || {
+            let conn = conn.lock().unwrap();
+            if !names.is_empty() {
+                let mut count = 0usize;
+                for name in &names {
+                    count += conn.execute(
+                        "DELETE FROM handles WHERE name = ? AND commitment_root IS NULL",
+                        params![name],
+                    )?;
+                }
+                Ok(count)
+            } else {
+                let (where_clause, filter_params) = build_handle_filter(&search, &filter);
+                let sql = if where_clause.is_empty() {
+                    "DELETE FROM handles WHERE commitment_root IS NULL".to_string()
+                } else {
+                    format!(
+                        "DELETE FROM handles{} AND commitment_root IS NULL",
+                        where_clause.replacen("WHERE", "WHERE", 1).replace("WHERE", "AND")
+                    )
+                };
+                let mut all: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
                 for p in &filter_params {
                     all.push(Box::new(p.clone()));
                 }

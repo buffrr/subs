@@ -1,62 +1,57 @@
 {% extends "base.html" %}
 {% block title %}Dashboard - subsd{% endblock %}
-{% block nav_dashboard_cls %}text-zinc-100 nav-active{% endblock %}
-{% block nav_dashboard_icon %}text-accent-500{% endblock %}
+{% block nav_dashboard_cls %}active{% endblock %}
+
+{% block topbar_left %}
+<span class="topbar-title">Dashboard</span>
+<button onclick="location.reload()" class="btn-sm" style="margin-left:12px">↻ Refresh</button>
+{% endblock %}
 
 {% block content %}
-<div class="space-y-8 animate-fade-in">
-    <div class="flex items-center justify-between">
-        <div>
-            <h1 class="text-2xl font-bold text-zinc-100 tracking-tight">Dashboard</h1>
-            <p class="mt-1 text-sm text-zinc-500">Manage your operated spaces</p>
-        </div>
-        <button onclick="location.reload()" class="btn-secondary rounded-xl px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-all duration-200 flex items-center gap-1.5">
-            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg>
-            Refresh
-        </button>
-    </div>
+<div class="anim" style="display:flex;flex-direction:column;gap:16px">
 
     {% if spaces.is_empty() && delegations.is_empty() %}
-    <div class="card rounded-3xl flex flex-col items-center justify-center py-20">
-        <div class="flex h-16 w-16 items-center justify-center rounded-2xl bg-surface-200">
-            <svg class="h-8 w-8 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
-            </svg>
+    <div class="card">
+        <div class="empty-state">
+            <div class="empty-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-muted)">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+                </svg>
+            </div>
+            <h3 style="font-family:var(--mono);font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:4px">No spaces yet</h3>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:20px">Delegate a space to this operator to get started.</p>
+            <a href="/ui/operate" class="btn-primary">Get Delegation Address</a>
         </div>
-        <h3 class="mt-4 text-sm font-semibold text-zinc-300">No spaces yet</h3>
-        <p class="mt-1 text-sm text-zinc-500">Delegate a space to this operator to get started.</p>
-        <a href="/ui/operate" class="mt-6 btn-primary rounded-xl px-6 py-2.5 text-sm font-medium text-white transition-all duration-200 flex items-center gap-2">
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.07-9.07l4.5-4.5a4.5 4.5 0 016.364 6.364l-1.757 1.757"/></svg>
-            Get Delegation Address
-        </a>
     </div>
     {% else %}
 
     {% if !delegations.is_empty() %}
-    <div class="space-y-3">
+    <div style="display:flex;flex-direction:column;gap:10px">
         <div class="flex items-center gap-2">
-            <div class="h-2 w-2 rounded-full bg-amber-400 animate-pulse"></div>
-            <h2 class="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Delegated to you</h2>
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--yellow)" class="animate-pulse"></span>
+            <span style="font-family:var(--mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted)">Delegated to you</span>
         </div>
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div class="card-grid cols-3">
             {% for name in delegations %}
-            <div class="card rounded-2xl p-5 border-dashed border-amber-500/30">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="flex items-center gap-2.5">
-                        <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/10">
-                            <svg class="h-4 w-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"/>
-                            </svg>
+            <div class="card" style="border-style:dashed;border-color:rgba(212,169,78,0.3)">
+                <div style="padding:18px">
+                    <div class="flex items-center justify-between" style="margin-bottom:14px">
+                        <div class="flex items-center gap-3">
+                            <div class="card-icon" style="background:var(--yellow-dim)">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" style="color:var(--yellow)">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"/>
+                                </svg>
+                            </div>
+                            <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--text-primary)">{{ name }}</span>
                         </div>
-                        <h3 class="text-[15px] font-bold text-zinc-100 font-mono">{{ name }}</h3>
+                        <span class="status-badge status-parked">NEW</span>
                     </div>
-                    <span class="badge rounded-lg px-2 py-0.5 text-[11px] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20">NEW</span>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px">This space has been delegated to your wallet but is not yet operated.</p>
+                    <button onclick="operateSpace('{{ name }}')" data-btn="{{ name }}" class="btn-primary w-full" style="justify-content:center">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z"/></svg>
+                        Start Operating
+                    </button>
                 </div>
-                <p class="text-xs text-zinc-500 mb-4">This space has been delegated to your wallet but is not yet operated.</p>
-                <button onclick="operateSpace('{{ name }}')" data-btn="{{ name }}" class="w-full btn-primary rounded-xl px-4 py-2.5 text-sm font-medium text-white transition-all duration-200 flex items-center justify-center gap-2">
-                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z"/></svg>
-                    Start Operating
-                </button>
             </div>
             {% endfor %}
         </div>
@@ -64,37 +59,49 @@
     {% endif %}
 
     {% if !spaces.is_empty() %}
-    <div class="space-y-3">
+    <div style="display:flex;flex-direction:column;gap:10px">
         {% if !delegations.is_empty() %}
-        <h2 class="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Active Spaces</h2>
+        <span style="font-family:var(--mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted)">Active Spaces</span>
         {% endif %}
-        <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div class="card-grid cols-3">
             {% for space in spaces %}
-            <a href="/ui/spaces/{{ space.space|urlencode }}" class="group card rounded-2xl p-5 hover:bg-surface-200 transition-all duration-300 hover:border-zinc-600 hover:-translate-y-0.5">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="flex items-center gap-2.5">
-                        <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-500/10 group-hover:bg-orange-500/15 transition-colors">
-                            <svg class="h-4 w-4 text-accent-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75">
+            <a href="/ui/spaces/{{ space.space|urlencode }}" class="card space-card">
+                <div class="flex items-center justify-between" style="margin-bottom:14px">
+                    <div class="flex items-center gap-3">
+                        <div class="card-icon" style="background:var(--accent-dim)">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" style="color:var(--accent)">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"/>
                             </svg>
                         </div>
-                        <h3 class="text-[15px] font-bold text-zinc-100 font-mono">{{ space.space }}</h3>
+                        <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--text-primary)">{{ space.space }}</span>
                     </div>
                     {% if space.has_groth16 %}
-                    <span class="badge rounded-lg px-2 py-0.5 text-[11px] font-semibold text-emerald-400">SNARK</span>
+                    <span class="status-badge status-committed">SNARK</span>
                     {% else if space.has_receipt %}
-                    <span class="badge rounded-lg px-2 py-0.5 text-[11px] font-semibold text-blue-400">STARK</span>
+                    <span class="status-badge status-published">STARK</span>
                     {% endif %}
                 </div>
-                <div class="flex items-center gap-5 text-sm">
-                    <div><span class="text-zinc-500 text-xs">Handles</span><p class="font-bold text-zinc-200 tabular-nums">{{ space.total_handles }}</p></div>
-                    <div class="h-8 w-px bg-zinc-700/50"></div>
-                    <div><span class="text-zinc-500 text-xs">Committed</span><p class="font-bold text-emerald-400 tabular-nums">{{ space.committed_handles }}</p></div>
-                    <div class="h-8 w-px bg-zinc-700/50"></div>
-                    <div><span class="text-zinc-500 text-xs">Staged</span><p class="font-bold tabular-nums {% if space.staged_handles > 0 %}text-amber-400{% else %}text-zinc-600{% endif %}">{{ space.staged_handles }}</p></div>
+                <div class="card-stats">
+                    <div>
+                        <div class="card-stat-label">Handles</div>
+                        <div class="card-stat-value" style="color:var(--text-primary)">{{ space.total_handles }}</div>
+                    </div>
+                    <div class="card-sep"></div>
+                    <div>
+                        <div class="card-stat-label">Committed</div>
+                        <div class="card-stat-value" style="color:var(--green)">{{ space.committed_handles }}</div>
+                    </div>
+                    <div class="card-sep"></div>
+                    <div>
+                        <div class="card-stat-label">Staged</div>
+                        <div class="card-stat-value" style="color:{% if space.staged_handles > 0 %}var(--accent){% else %}var(--text-muted){% endif %}">{{ space.staged_handles }}</div>
+                    </div>
                     {% if space.pending_proofs > 0 %}
-                    <div class="h-8 w-px bg-zinc-700/50"></div>
-                    <div><span class="text-zinc-500 text-xs">Proofs</span><p class="font-bold text-violet-400 tabular-nums">{{ space.pending_proofs }}</p></div>
+                    <div class="card-sep"></div>
+                    <div>
+                        <div class="card-stat-label">Proofs</div>
+                        <div class="card-stat-value" style="color:var(--purple)">{{ space.pending_proofs }}</div>
+                    </div>
                     {% endif %}
                 </div>
             </a>
@@ -108,17 +115,32 @@
 {% endblock %}
 {% block scripts %}
 <script>
-async function operateSpace(name){
-    const btn=document.querySelector(`[data-btn="${name}"]`);
-    const orig=btn.innerHTML;
-    btn.disabled=true;
-    btn.innerHTML='<svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Setting up...';
-    try{
-        const res=await fetch(`/spaces/${encodeURIComponent(name)}/operate`,{method:'POST',headers:{'Content-Type':'application/json'}});
-        const j=await res.json();
-        if(res.ok){window.location.href=`/ui/spaces/${encodeURIComponent(name)}`}
-        else{btn.disabled=false;btn.innerHTML=orig;alert(j.error||'Failed to operate space')}
-    }catch(e){btn.disabled=false;btn.innerHTML=orig;alert(e.message)}
+async function operateSpace(name) {
+    const btn = document.querySelector(`[data-btn="${name}"]`);
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" class="animate-spin">'
+        + '<circle opacity="0.25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>'
+        + '<path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>'
+        + '</svg>Setting up...';
+    try {
+        const r = await fetch(`/spaces/${encodeURIComponent(name)}/operate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const j = await r.json();
+        if (r.ok) {
+            window.location.href = `/ui/spaces/${encodeURIComponent(name)}`;
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+            alert(j.error || 'Failed to operate space');
+        }
+    } catch (e) {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+        alert(e.message);
+    }
 }
 </script>
 {% endblock %}

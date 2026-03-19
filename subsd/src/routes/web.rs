@@ -29,10 +29,6 @@ pub struct OperateTemplate {
 }
 
 #[derive(Template)]
-#[template(path = "certs.html")]
-pub struct CertsTemplate;
-
-#[derive(Template)]
 #[template(path = "query.html")]
 pub struct QueryTemplate;
 
@@ -97,12 +93,6 @@ pub async fn operate_page(State(state): State<AppState>) -> Html<String> {
     };
 
     let template = OperateTemplate { space_address };
-    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
-}
-
-/// GET /ui/certs - Certificates page
-pub async fn certs_page() -> Html<String> {
-    let template = CertsTemplate;
     Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
 }
 

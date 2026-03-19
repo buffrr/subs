@@ -1,45 +1,37 @@
 {% extends "base.html" %}
 {% block title %}{{ handle }}{{ space }} - subsd{% endblock %}
+{% block nav_dashboard_cls %}active{% endblock %}
+
+{% block topbar_left %}
+<a href="/ui/spaces/{{ space|urlencode }}" class="topbar-back">← {{ space }}</a>
+<div class="topbar-divider"></div>
+<span class="topbar-title">{{ handle }}{{ space }}</span>
+{% endblock %}
 
 {% block content %}
-<div class="space-y-8 animate-fade-in">
-    <div>
-        <div class="flex items-center gap-3">
-            <a href="/ui/spaces/{{ space|urlencode }}" class="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-300 transition-colors">
-                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>{{ space }}
-            </a>
-            <div class="h-5 w-px bg-zinc-700"></div>
-            <h1 class="text-2xl font-bold text-zinc-100 font-mono tracking-tight" id="handleTitle">{{ handle }}{{ space }}</h1>
-        </div>
-    </div>
+<div class="anim" style="display:flex;flex-direction:column;gap:16px">
 
     <!-- Handle Info -->
-    <div class="card rounded-3xl overflow-hidden">
-        <div class="border-b divider px-6 py-4">
-            <h2 class="text-sm font-semibold text-zinc-300">Details</h2>
-        </div>
-        <div id="handleInfo" class="p-6 text-sm text-zinc-500">Loading...</div>
+    <div class="card anim" style="animation-delay:.04s">
+        <div class="section-header"><h3>Details</h3></div>
+        <div class="section-body" id="handleInfo" style="color:var(--text-muted);font-size:13px">Loading...</div>
     </div>
 
     <!-- Actions -->
-    <div id="actionsCard" class="card rounded-3xl overflow-hidden hidden">
-        <div class="border-b divider px-6 py-4">
-            <h2 class="text-sm font-semibold text-zinc-300">Actions</h2>
-        </div>
-        <div id="handleActions" class="p-6 flex flex-wrap gap-3"></div>
-        <div id="actionResult" class="hidden px-6 pb-6"></div>
+    <div id="actionsCard" class="card anim hidden" style="animation-delay:.1s">
+        <div class="section-header"><h3>Actions</h3></div>
+        <div class="section-body flex flex-wrap gap-3" id="handleActions"></div>
+        <div id="actionResult" class="hidden" style="padding:0 17px 17px"></div>
     </div>
 
     <!-- Query Result -->
-    <div id="queryCard" class="card rounded-3xl overflow-hidden hidden">
-        <div class="border-b divider px-6 py-4 flex items-center justify-between">
-            <h2 class="text-sm font-semibold text-zinc-300">Fabric Query</h2>
-            <button onclick="queryHandle()" class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1">
-                <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg>Refresh
-            </button>
+    <div id="queryCard" class="card anim hidden" style="animation-delay:.16s">
+        <div class="section-header">
+            <h3>Fabric Query</h3>
+            <button onclick="queryHandle()" class="btn-sm">↻ Refresh</button>
         </div>
-        <div id="queryResult" class="p-6">
-            <pre class="bg-surface-50 border border-zinc-800 rounded-xl p-4 text-sm text-zinc-400 font-mono overflow-x-auto max-h-96 overflow-y-auto whitespace-pre-wrap scrollbar-thin">Click "Query Fabric" to resolve this handle</pre>
+        <div class="section-body" id="queryResult">
+            <pre class="code-block">Click "Query Fabric" to resolve this handle</pre>
         </div>
     </div>
 </div>
@@ -47,163 +39,212 @@
 
 {% block scripts %}
 <script>
-const space='{{ space }}';
-const handle='{{ handle }}';
-const fullHandle=handle+space;
-let handleData=null;
+const space = '{{ space }}';
+const handle = '{{ handle }}';
+const fullHandle = handle + space;
+let handleData = null;
 
-function esc(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML}
+/* --- Helpers --- */
 
-function statusBadge(h){
-    if(!h.commitment_root)return'<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-medium text-zinc-400">Staged</span>';
-    return'<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-medium text-emerald-400">Committed</span>';
+function esc(t) {
+    const d = document.createElement('div');
+    d.textContent = t;
+    return d.innerHTML;
 }
 
-function pubBadge(s){
-    if(s==='final')return'<span class="rounded-lg px-2 py-0.5 text-[11px] font-medium text-blue-400 bg-blue-500/10 border border-blue-500/20">Published</span>';
-    if(s==='temp')return'<span class="rounded-lg px-2 py-0.5 text-[11px] font-medium text-purple-400 bg-purple-500/10 border border-purple-500/20">Temp Cert</span>';
-    return'<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-medium text-zinc-500">Unpublished</span>';
+function statusBadge(h) {
+    if (!h.commitment_root) return '<span class="status-badge status-staged">Staged</span>';
+    return '<span class="status-badge status-committed">Committed</span>';
 }
 
-async function loadHandle(){
-    try{
-        const r=await fetch(`/spaces/${encodeURIComponent(space)}/handles/${encodeURIComponent(handle)}`);
-        if(!r.ok){document.getElementById('handleInfo').innerHTML='<span class="text-red-400">Handle not found</span>';return}
-        handleData=await r.json();
+function pubBadge(s) {
+    if (s === 'final') return '<span class="status-badge status-published">Published</span>';
+    if (s === 'temp')  return '<span class="status-badge status-temp">Temp Cert</span>';
+    return '<span class="status-badge status-pending">Unpublished</span>';
+}
+
+function showResult(msg, ok) {
+    const el = document.getElementById('actionResult');
+    el.className = `alert ${ok ? 'alert-success' : 'alert-error'}`;
+    el.style.padding = '';
+    el.style.margin = '0 17px 17px';
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    if (ok) setTimeout(() => el.classList.add('hidden'), 3000);
+}
+
+/* --- Load & render --- */
+
+async function loadHandle() {
+    try {
+        const r = await fetch(`/spaces/${encodeURIComponent(space)}/handles/${encodeURIComponent(handle)}`);
+        if (!r.ok) {
+            document.getElementById('handleInfo').innerHTML = '<span style="color:var(--red)">Handle not found</span>';
+            return;
+        }
+        handleData = await r.json();
         renderInfo(handleData);
         renderActions(handleData);
-    }catch(e){
-        document.getElementById('handleInfo').innerHTML=`<span class="text-red-400">${esc(e.message)}</span>`;
+    } catch (e) {
+        document.getElementById('handleInfo').innerHTML = `<span style="color:var(--red)">${esc(e.message)}</span>`;
     }
 }
 
-function renderInfo(h){
-    const info=document.getElementById('handleInfo');
-    info.innerHTML=`
-        <div class="space-y-4">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                    <div class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Handle</div>
-                    <div class="text-sm text-zinc-200 font-mono">${esc(h.name)}${esc(space)}</div>
-                </div>
-                <div>
-                    <div class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Status</div>
-                    <div class="flex items-center gap-2">${statusBadge(h)} ${pubBadge(h.publish_status)}${h.parked?' <span class="rounded-lg px-2 py-0.5 text-[11px] font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20">Parked</span>':''}</div>
-                </div>
+function renderInfo(h) {
+    const info = document.getElementById('handleInfo');
+    info.innerHTML = `
+        <div class="detail-grid">
+            <div>
+                <div class="detail-label">Handle</div>
+                <div class="detail-value">${esc(h.name)}${esc(space)}</div>
             </div>
             <div>
-                <div class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Script Pubkey</div>
-                <div class="text-sm text-zinc-300 font-mono break-all select-all">${esc(h.script_pubkey)}</div>
+                <div class="detail-label">Status</div>
+                <div class="flex items-center gap-2">
+                    ${statusBadge(h)} ${pubBadge(h.publish_status)}
+                    ${h.parked ? ' <span class="status-badge status-parked">Parked</span>' : ''}
+                </div>
             </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                    <div class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Batch</div>
-                    <div class="text-sm text-zinc-300 font-mono">${h.commitment_idx!=null?'#'+h.commitment_idx:'<span class="text-zinc-600">-</span>'}</div>
-                </div>
-                <div>
-                    <div class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Commitment Root</div>
-                    <div class="text-sm text-zinc-300 font-mono break-all select-all">${h.commitment_root||'<span class="text-zinc-600">-</span>'}</div>
-                </div>
+        </div>
+        <div style="margin-top:16px">
+            <div class="detail-label">Script Pubkey</div>
+            <div class="hash-row" style="margin-top:5px">
+                <span class="hash-value break-all" style="white-space:normal">${esc(h.script_pubkey)}</span>
+                <button class="hash-copy" onclick="copyToClipboard('${esc(h.script_pubkey)}',this)">copy</button>
+            </div>
+        </div>
+        <div class="detail-grid" style="margin-top:16px">
+            <div>
+                <div class="detail-label">Batch</div>
+                <div class="detail-value">${h.commitment_idx != null ? '#' + h.commitment_idx : '<span style="color:var(--text-muted)">-</span>'}</div>
+            </div>
+            <div>
+                <div class="detail-label">Commitment Root</div>
+                ${h.commitment_root
+                    ? `<div class="hash-row" style="margin-top:5px">
+                        <span class="hash-value break-all" style="white-space:normal">${esc(h.commitment_root)}</span>
+                        <button class="hash-copy" onclick="copyToClipboard('${esc(h.commitment_root)}',this)">copy</button>
+                       </div>`
+                    : '<div class="detail-value" style="color:var(--text-muted)">-</div>'}
             </div>
         </div>`;
 }
 
-function renderActions(h){
-    const card=document.getElementById('actionsCard');
-    const actions=document.getElementById('handleActions');
+function renderActions(h) {
+    const card = document.getElementById('actionsCard');
+    const actions = document.getElementById('handleActions');
     card.classList.remove('hidden');
-    let btns='';
 
-    // Park/Unpark (only if staged)
-    if(!h.commitment_root){
-        if(h.parked){
-            btns+=`<button onclick="togglePark(false)" class="btn-secondary rounded-xl px-5 py-2.5 text-sm font-medium text-zinc-300 transition-all duration-200 flex items-center gap-2">
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9"/></svg>Unpark</button>`;
-        }else{
-            btns+=`<button onclick="togglePark(true)" class="btn-secondary rounded-xl px-5 py-2.5 text-sm font-medium text-zinc-300 transition-all duration-200 flex items-center gap-2">
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5"/></svg>Park</button>`;
-        }
+    let btns = '';
+    if (!h.commitment_root) {
+        btns += h.parked
+            ? `<button onclick="togglePark(false)" class="btn-secondary">Unpark</button>`
+            : `<button onclick="togglePark(true)" class="btn-secondary">Park</button>`;
+        btns += `<button onclick="removeHandle()" class="btn-secondary" style="color:var(--red)">Remove</button>`;
     }
-
-    // Publish / Re-publish cert
-    const pubLabel=h.publish_status?'Re-publish Certificate':'Publish Certificate';
-    btns+=`<button onclick="publishCert()" class="btn-secondary rounded-xl px-5 py-2.5 text-sm font-medium text-zinc-300 transition-all duration-200 flex items-center gap-2">
-        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/></svg>${pubLabel}</button>`;
-
-    // Download cert
-    btns+=`<button onclick="downloadCert()" class="btn-secondary rounded-xl px-5 py-2.5 text-sm font-medium text-zinc-300 transition-all duration-200 flex items-center gap-2">
-        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>Download Certificates</button>`;
-
-    // Query fabric
-    btns+=`<button onclick="queryHandle()" class="btn-secondary rounded-xl px-5 py-2.5 text-sm font-medium text-zinc-300 transition-all duration-200 flex items-center gap-2">
-        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>Query Fabric</button>`;
-
-    actions.innerHTML=btns;
+    const pubLabel = h.publish_status ? 'Re-publish Certificate' : 'Publish Certificate';
+    btns += `<button onclick="publishCert()" class="btn-secondary">${pubLabel}</button>`;
+    btns += `<button onclick="downloadCert()" class="btn-secondary">Download Certificates</button>`;
+    btns += `<button onclick="queryHandle()" class="btn-secondary">Query Fabric</button>`;
+    actions.innerHTML = btns;
 }
 
-function showResult(msg,ok){
-    const el=document.getElementById('actionResult');
-    el.className=`px-6 pb-6 text-sm animate-fade-in ${ok?'text-emerald-400':'text-red-400'}`;
-    el.textContent=msg;
-    el.classList.remove('hidden');
-    if(ok)setTimeout(()=>el.classList.add('hidden'),3000);
-}
+/* --- Actions --- */
 
-async function togglePark(parked){
-    try{
-        const r=await fetch(`/spaces/${encodeURIComponent(space)}/park`,{
-            method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({handles:[handle],parked})
+async function togglePark(parked) {
+    try {
+        const r = await fetch(`/spaces/${encodeURIComponent(space)}/park`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ handles: [handle], parked })
         });
-        const j=await r.json();
-        if(r.ok){showResult(parked?'Handle parked':'Handle unparked',true);loadHandle()}
-        else showResult(j.error||JSON.stringify(j),false);
-    }catch(e){showResult(e.message,false)}
+        const j = await r.json();
+        if (r.ok) {
+            showResult(parked ? 'Handle parked' : 'Handle unparked', true);
+            loadHandle();
+        } else {
+            showResult(j.error || JSON.stringify(j), false);
+        }
+    } catch (e) {
+        showResult(e.message, false);
+    }
 }
 
-async function publishCert(){
-    showResult('Issuing certificate...',true);
-    try{
-        const r=await fetch(`/certs/${encodeURIComponent(fullHandle)}`);
-        if(!r.ok){const j=await r.json();showResult(j.error||'Failed to issue cert',false);return}
-        const cert=await r.json();
+async function removeHandle() {
+    if (!confirm(`Remove ${handle}${space}? This cannot be undone.`)) return;
+    try {
+        const r = await fetch(`/spaces/${encodeURIComponent(space)}/remove`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ handles: [handle] })
+        });
+        const j = await r.json();
+        if (r.ok) {
+            window.location.href = `/ui/spaces/${encodeURIComponent(space)}`;
+        } else {
+            showResult(j.error || JSON.stringify(j), false);
+        }
+    } catch (e) {
+        showResult(e.message, false);
+    }
+}
 
-        // Submit to fabric via the operator's publish flow
-        // We re-use the space publish endpoint but for clarity just issue + show success
-        showResult('Certificate issued successfully',true);
+async function publishCert() {
+    showResult('Issuing certificate...', true);
+    try {
+        const r = await fetch(`/certs/${encodeURIComponent(fullHandle)}`);
+        if (!r.ok) {
+            const j = await r.json();
+            showResult(j.error || 'Failed to issue cert', false);
+            return;
+        }
+        await r.json();
+        showResult('Certificate issued successfully', true);
         loadHandle();
-    }catch(e){showResult(e.message,false)}
+    } catch (e) {
+        showResult(e.message, false);
+    }
 }
 
-async function downloadCert(){
-    try{
-        const r=await fetch(`/certs/${encodeURIComponent(fullHandle)}`);
-        if(!r.ok){const j=await r.json();showResult(j.error||'Failed to issue cert',false);return}
-        const cert=await r.json();
-        const blob=new Blob([JSON.stringify(cert,null,2)],{type:'application/json'});
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement('a');
-        a.href=url;a.download=`${handle}${space}.cert.json`;
-        document.body.appendChild(a);a.click();
-        document.body.removeChild(a);URL.revokeObjectURL(url);
-        showResult('Certificate downloaded',true);
-    }catch(e){showResult(e.message,false)}
+async function downloadCert() {
+    try {
+        const r = await fetch(`/certs/${encodeURIComponent(fullHandle)}`);
+        if (!r.ok) {
+            const j = await r.json();
+            showResult(j.error || 'Failed to issue cert', false);
+            return;
+        }
+        const cert = await r.json();
+        const blob = new Blob([JSON.stringify(cert, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${handle}${space}.cert.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showResult('Certificate downloaded', true);
+    } catch (e) {
+        showResult(e.message, false);
+    }
 }
 
-async function queryHandle(){
-    const card=document.getElementById('queryCard');
-    const result=document.getElementById('queryResult');
+async function queryHandle() {
+    const card = document.getElementById('queryCard');
+    const result = document.getElementById('queryResult');
     card.classList.remove('hidden');
-    result.innerHTML='<pre class="bg-surface-50 border border-zinc-800 rounded-xl p-4 text-sm text-zinc-400 font-mono overflow-x-auto max-h-96 overflow-y-auto whitespace-pre-wrap scrollbar-thin">Querying...</pre>';
-    try{
-        const r=await fetch('/query',{
-            method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({handle:fullHandle})
+    result.innerHTML = '<pre class="code-block">Querying...</pre>';
+    try {
+        const r = await fetch('/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ handle: fullHandle })
         });
-        const j=await r.json();
-        result.innerHTML=`<pre class="bg-surface-50 border border-zinc-800 rounded-xl p-4 text-sm text-zinc-400 font-mono overflow-x-auto max-h-96 overflow-y-auto whitespace-pre-wrap scrollbar-thin">${esc(JSON.stringify(j,null,2))}</pre>`;
-    }catch(e){
-        result.innerHTML=`<pre class="bg-surface-50 border border-zinc-800 rounded-xl p-4 text-sm text-red-400 font-mono overflow-x-auto">${esc(e.message)}</pre>`;
+        const j = await r.json();
+        result.innerHTML = `<pre class="code-block">${esc(JSON.stringify(j, null, 2))}</pre>`;
+    } catch (e) {
+        result.innerHTML = `<pre class="code-block" style="color:var(--red)">${esc(e.message)}</pre>`;
     }
 }
 

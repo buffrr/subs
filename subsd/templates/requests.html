@@ -1,60 +1,139 @@
 {% extends "base.html" %}
 {% block title %}Requests - subsd{% endblock %}
-{% block nav_requests_cls %}text-zinc-100 nav-active{% endblock %}
-{% block nav_requests_icon %}text-accent-500{% endblock %}
+
+{% block topbar_left %}
+<span class="topbar-title">Handle Requests</span>
+{% endblock %}
 
 {% block content %}
-<div class="space-y-8 animate-fade-in">
-    <div>
-        <h1 class="text-2xl font-bold text-zinc-100 tracking-tight">Handle Requests</h1>
-        <p class="mt-1 text-sm text-zinc-500">Add handle registration requests individually or in bulk</p>
-    </div>
+<div class="anim" style="display:flex;flex-direction:column;gap:16px">
 
-    <div class="card rounded-3xl overflow-hidden">
-        <div class="border-b divider px-6 py-4"><h2 class="text-sm font-semibold text-zinc-300">Add Request</h2></div>
-        <div class="p-6">
-            <form id="addRequestForm" class="space-y-4">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="card anim" style="animation-delay:.04s">
+        <div class="section-header"><h3>Add Request</h3></div>
+        <div class="section-body">
+            <form id="addRequestForm" style="display:flex;flex-direction:column;gap:14px">
+                <div class="two-col">
                     <div>
-                        <label for="handle" class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">Handle</label>
-                        <input type="text" id="handle" placeholder="alice@example" class="block w-full rounded-xl input-field px-3.5 py-2.5 text-sm transition-all" required>
-                        <p class="mt-1.5 text-xs text-zinc-500">Format: name@space</p>
+                        <label for="handle" class="form-label">Handle</label>
+                        <input type="text" id="handle" placeholder="alice@example" class="input-field w-full" required>
+                        <div class="form-hint">Format: name@space</div>
                     </div>
                     <div>
-                        <label for="scriptPubkey" class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">Script Pubkey <span class="text-zinc-600 normal-case">(optional)</span></label>
-                        <input type="text" id="scriptPubkey" placeholder="5120..." class="block w-full rounded-xl input-field px-3.5 py-2.5 text-sm font-mono transition-all">
+                        <label for="scriptPubkey" class="form-label">Script Pubkey <span class="hint">(optional)</span></label>
+                        <input type="text" id="scriptPubkey" placeholder="5120..." class="input-field w-full">
                     </div>
                 </div>
-                <div class="flex gap-3 pt-1">
-                    <button type="submit" class="btn-primary rounded-xl px-6 py-2.5 text-sm font-medium text-white transition-all duration-200">Add Request</button>
-                    <button type="button" onclick="generateRequest()" class="btn-secondary rounded-xl px-5 py-2.5 text-sm font-medium text-zinc-300 transition-all duration-200">Generate & Download</button>
+                <div class="flex gap-3">
+                    <button type="submit" class="btn-primary">Add Request</button>
+                    <button type="button" onclick="generateRequest()" class="btn-secondary">Generate & Download</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <div class="card rounded-3xl overflow-hidden">
-        <div class="border-b divider px-6 py-4"><h2 class="text-sm font-semibold text-zinc-300">Bulk Add</h2></div>
-        <div class="p-6">
-            <form id="bulkAddForm" class="space-y-4">
-                <textarea id="bulkJson" rows="5" placeholder='[{"handle": "alice@example", "script_pubkey": "5120..."}]' class="block w-full rounded-xl input-field px-3.5 py-2.5 text-sm font-mono transition-all resize-none"></textarea>
-                <button type="submit" class="btn-primary rounded-xl px-6 py-2.5 text-sm font-medium text-white transition-all duration-200">Add All</button>
+    <div class="card anim" style="animation-delay:.1s">
+        <div class="section-header"><h3>Bulk Add</h3></div>
+        <div class="section-body">
+            <form id="bulkAddForm" style="display:flex;flex-direction:column;gap:14px">
+                <textarea id="bulkJson" rows="5" placeholder='[{"handle": "alice@example", "script_pubkey": "5120..."}]' class="input-field w-full"></textarea>
+                <button type="submit" class="btn-primary">Add All</button>
             </form>
         </div>
     </div>
 
-    <div id="results" class="hidden card rounded-3xl overflow-hidden animate-fade-in">
-        <div class="border-b divider px-6 py-4"><h2 class="text-sm font-semibold text-zinc-300">Results</h2></div>
-        <div class="p-6"><pre id="resultsContent" class="text-sm text-zinc-400 font-mono overflow-x-auto bg-surface-200 rounded-xl p-4 border border-zinc-700/50"></pre></div>
+    <div id="results" class="hidden card anim">
+        <div class="section-header"><h3>Results</h3></div>
+        <div class="section-body"><pre id="resultsContent" class="code-block"></pre></div>
     </div>
 </div>
 {% endblock %}
 {% block scripts %}
 <script>
-document.getElementById('addRequestForm').addEventListener('submit',async e=>{e.preventDefault();const h=document.getElementById('handle').value,s=document.getElementById('scriptPubkey').value,reqs=[{handle:h,script_pubkey:s||undefined}];if(!s){try{const g=await fetch('/requests/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({handle:h})});if(!g.ok){showResults(await g.json());return}const r=await g.json();reqs[0]=r.request;if(r.private_key)showResults({message:'Request added with generated keypair',private_key:r.private_key,warning:'Save this private key!'})}catch(e){showResults({error:e.message});return}}await addRequests(reqs)});
-document.getElementById('bulkAddForm').addEventListener('submit',async e=>{e.preventDefault();try{await addRequests(JSON.parse(document.getElementById('bulkJson').value))}catch(e){showResults({error:`Invalid JSON: ${e.message}`})}});
-async function addRequests(r){try{const res=await fetch('/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requests:r})});showResults(await res.json())}catch(e){showResults({error:e.message})}}
-async function generateRequest(){const h=document.getElementById('handle').value;if(!h){alert('Enter a handle');return}try{const r=await fetch('/requests/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({handle:h})}),j=await r.json();if(r.ok){const b=new Blob([JSON.stringify(j,null,2)],{type:'application/json'}),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=`${h.replace('@','_')}.json`;a.click();URL.revokeObjectURL(u);showResults({message:'Generated and downloaded',...j})}else showResults({error:j})}catch(e){showResults({error:e.message})}}
-function showResults(d){document.getElementById('results').classList.remove('hidden');document.getElementById('resultsContent').textContent=JSON.stringify(d,null,2)}
+function showResults(data) {
+    document.getElementById('results').classList.remove('hidden');
+    document.getElementById('resultsContent').textContent = JSON.stringify(data, null, 2);
+}
+
+async function addRequests(requests) {
+    try {
+        const r = await fetch('/requests', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requests })
+        });
+        showResults(await r.json());
+    } catch (e) {
+        showResults({ error: e.message });
+    }
+}
+
+async function generateRequest() {
+    const handle = document.getElementById('handle').value;
+    if (!handle) { alert('Enter a handle'); return; }
+    try {
+        const r = await fetch('/requests/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ handle })
+        });
+        const j = await r.json();
+        if (r.ok) {
+            const blob = new Blob([JSON.stringify(j, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${handle.replace('@', '_')}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showResults({ message: 'Generated and downloaded', ...j });
+        } else {
+            showResults({ error: j });
+        }
+    } catch (e) {
+        showResults({ error: e.message });
+    }
+}
+
+/* Add single request */
+document.getElementById('addRequestForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const handle = document.getElementById('handle').value;
+    const scriptPubkey = document.getElementById('scriptPubkey').value;
+    const reqs = [{ handle, script_pubkey: scriptPubkey || undefined }];
+
+    if (!scriptPubkey) {
+        try {
+            const g = await fetch('/requests/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ handle })
+            });
+            if (!g.ok) { showResults(await g.json()); return; }
+            const r = await g.json();
+            reqs[0] = r.request;
+            if (r.private_key) {
+                showResults({
+                    message: 'Request added with generated keypair',
+                    private_key: r.private_key,
+                    warning: 'Save this private key!'
+                });
+            }
+        } catch (e) {
+            showResults({ error: e.message });
+            return;
+        }
+    }
+    await addRequests(reqs);
+});
+
+/* Bulk add */
+document.getElementById('bulkAddForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+        await addRequests(JSON.parse(document.getElementById('bulkJson').value));
+    } catch (e) {
+        showResults({ error: `Invalid JSON: ${e.message}` });
+    }
+});
 </script>
 {% endblock %}

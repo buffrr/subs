@@ -1,168 +1,164 @@
 {% extends "base.html" %}
 {% block title %}{{ space.space }} - subsd{% endblock %}
+{% block nav_dashboard_cls %}active{% endblock %}
+
+{% block topbar_left %}
+<a href="/" class="topbar-back">← back</a>
+<div class="topbar-divider"></div>
+<span class="topbar-title">{{ space.space }}</span>
+{% if space.has_groth16 %}<span class="status-badge status-committed" style="margin-left:8px">SNARK</span>{% endif %}
+{% if space.has_receipt %}<span class="status-badge status-published" style="margin-left:8px">STARK</span>{% endif %}
+{% endblock %}
 
 {% block content %}
-<div class="space-y-8 animate-fade-in">
-    <div>
-        <div class="flex items-center gap-3">
-            <a href="/" class="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-300 transition-colors">
-                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>Back
-            </a>
-            <div class="h-5 w-px bg-zinc-700"></div>
-            <h1 class="text-2xl font-bold text-zinc-100 font-mono tracking-tight">{{ space.space }}</h1>
-            {% if space.has_groth16 %}<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-semibold text-emerald-400">SNARK</span>{% endif %}
-            {% if space.has_receipt %}<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-semibold text-blue-400">STARK</span>{% endif %}
-        </div>
-    </div>
+<div class="anim" style="display:flex;flex-direction:column;gap:16px">
 
-    <!-- Stats -->
-    <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div class="card rounded-2xl p-5">
-            <div class="flex items-center gap-2 mb-2">
-                <div class="h-5 w-5 rounded-lg bg-zinc-700/50 flex items-center justify-center"><svg class="h-3 w-3 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg></div>
-                <span class="text-xs text-zinc-500 font-medium">Total</span>
+    <!-- Summary Bar -->
+    <div class="summary-bar anim" style="animation-delay:.04s">
+        <div class="summary-stats">
+            <div class="summary-stat total">
+                <span class="num">{{ space.total_handles }}</span>
+                <span class="lbl">handles</span>
             </div>
-            <p class="text-2xl font-bold text-zinc-100 tabular-nums">{{ space.total_handles }}</p>
+            <div class="summary-sep"></div>
+            <div class="summary-stat committed">
+                <span class="num">{{ space.committed_handles }}</span>
+                <span class="lbl">committed</span>
+            </div>
+            <div class="summary-stat staged">
+                <span class="num">{{ space.staged_handles }}</span>
+                <span class="lbl">staged</span>
+            </div>
+            {% if space.parked_handles > 0 %}
+            <div class="summary-stat" style="--c:var(--yellow)">
+                <span class="num" style="color:var(--yellow)">{{ space.parked_handles }}</span>
+                <span class="lbl">parked</span>
+            </div>
+            {% endif %}
+            <div class="summary-sep"></div>
+            <div class="summary-stat commits">
+                <span class="num">{{ space.commitments }}</span>
+                <span class="lbl">commits</span>
+            </div>
         </div>
-        <div class="card rounded-2xl p-5">
-            <div class="flex items-center gap-2 mb-2">
-                <div class="h-5 w-5 rounded-lg bg-emerald-500/10 flex items-center justify-center"><svg class="h-3 w-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>
-                <span class="text-xs text-zinc-500 font-medium">Committed</span>
-            </div>
-            <p class="text-2xl font-bold text-emerald-400 tabular-nums">{{ space.committed_handles }}</p>
-        </div>
-        <div class="card rounded-2xl p-5">
-            <div class="flex items-center gap-2 mb-2">
-                <div class="h-5 w-5 rounded-lg bg-amber-500/10 flex items-center justify-center"><svg class="h-3 w-3 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>
-                <span class="text-xs text-zinc-500 font-medium">Staged</span>
-            </div>
-            <p class="text-2xl font-bold tabular-nums {% if space.staged_handles > 0 %}text-amber-400{% else %}text-zinc-600{% endif %}">{{ space.staged_handles }}</p>
-        </div>
-        <div class="card rounded-2xl p-5">
-            <div class="flex items-center gap-2 mb-2">
-                <div class="h-5 w-5 rounded-lg bg-violet-500/10 flex items-center justify-center"><svg class="h-3 w-3 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z"/></svg></div>
-                <span class="text-xs text-zinc-500 font-medium">Commits</span>
-            </div>
-            <p class="text-2xl font-bold text-zinc-100 tabular-nums">{{ space.commitments }}</p>
+        <div class="summary-actions">
+            <button id="publishBar" onclick="publishCerts()" class="publish-btn hidden">
+                ⊕ <span id="publishLabel">Publish</span>
+            </button>
         </div>
     </div>
 
     <!-- Pipeline -->
-    <div class="card rounded-3xl overflow-hidden">
-        <div class="border-b divider px-6 py-4 flex items-center justify-between">
-            <h2 class="text-sm font-semibold text-zinc-300">Commitment Pipeline</h2>
-            <button onclick="refreshPipeline()" class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1">
-                <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg>Refresh
-            </button>
+    <div class="card anim" style="animation-delay:.1s">
+        <div class="section-header">
+            <h3>Commitment Pipeline</h3>
+            <button onclick="refreshPipeline()" class="btn-sm">↻ Refresh</button>
         </div>
-        <div class="p-6">
-            <div id="pipelineStepper" class="text-zinc-500 text-sm">Loading...</div>
-            <div id="pipelineMessage" class="mt-3 text-sm text-zinc-500"></div>
-            <div id="pipelineActions" class="mt-5"></div>
-            <div id="provingEndpoint" class="mt-3 text-xs"></div>
+        <div class="section-body">
+            <div id="pipelineStepper" style="color:var(--text-muted);font-size:13px">Loading...</div>
+            <div id="pipelineMessage" style="margin-top:12px;font-size:13px;color:var(--text-muted)"></div>
+            <div id="pipelineActions" style="margin-top:16px"></div>
+            <div id="provingEndpoint" style="margin-top:10px;font-size:11px"></div>
         </div>
-    </div>
-
-    <!-- Publish -->
-    <div id="publishBar" class="hidden animate-fade-in">
-        <button onclick="publishCerts()" class="w-full rounded-2xl px-6 py-4 text-sm font-medium text-white transition-all duration-200 flex items-center justify-center gap-2.5" style="background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 0 20px rgba(16,185,129,0.15)">
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/></svg>
-            <span id="publishLabel">Publish Certificates</span>
-        </button>
     </div>
 
     <!-- Handles -->
-    <div class="card rounded-3xl overflow-hidden">
-        <div class="border-b divider px-6 py-4 flex items-center justify-between">
-            <h2 class="text-sm font-semibold text-zinc-300">Handles</h2>
+    <div class="card anim" style="animation-delay:.16s">
+        <div class="section-header">
             <div class="flex items-center gap-3">
-                <div id="handlesPagination" class="flex items-center gap-2 text-sm"></div>
-                <button onclick="toggleStageForm()" id="stageToggleBtn" class="btn-secondary rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all flex items-center gap-1.5">
-                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-                    Add
-                </button>
+                <h3>Handles</h3>
+                <div id="handlesPagination" class="flex items-center gap-2" style="font-size:11px"></div>
             </div>
+            <button onclick="toggleStageForm()" id="stageToggleBtn" class="add-btn">+ Add</button>
         </div>
-        <div id="stageForm" class="hidden border-b divider px-6 py-4 animate-fade-in">
-            <form id="addHandleForm" class="flex items-end gap-3">
-                <div class="flex-1">
-                    <label class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">Handle</label>
-                    <div class="flex">
-                        <input type="text" id="stageHandle" placeholder="alice" class="flex-1 rounded-l-lg input-field px-3 py-2 text-sm transition-all" required>
-                        <span class="inline-flex items-center rounded-r-lg bg-surface-300 border border-l-0 border-zinc-700 px-3 text-sm text-zinc-400 font-mono">{{ space.space }}</span>
+
+        <!-- Stage Form -->
+        <div id="stageForm" class="stage-form hidden">
+            <form id="addHandleForm" class="stage-form-inner">
+                <div class="flex items-end gap-3">
+                    <div class="flex-1">
+                        <label class="form-label">Handle</label>
+                        <div class="flex">
+                            <input type="text" id="stageHandle" placeholder="alice" class="input-field with-suffix flex-1" required>
+                            <span class="input-suffix">{{ space.space }}</span>
+                        </div>
+                    </div>
+                    <div id="scriptPubkeyField" class="flex-1 hidden">
+                        <label class="form-label">Script Pubkey</label>
+                        <input type="text" id="stageScriptPubkey" placeholder="5120..." class="input-field w-full font-mono">
+                    </div>
+                    <button type="button" onclick="toggleScriptPubkey()" class="btn-sm" title="Custom script pubkey">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                    </button>
+                    <button type="submit" class="btn-primary">Stage</button>
+                </div>
+                <div style="margin-top:10px">
+                    <button type="button" onclick="toggleBulkForm()" style="font-family:var(--mono);font-size:11px;color:var(--text-muted);background:none;border:none;cursor:pointer">Bulk add...</button>
+                </div>
+                <div id="bulkForm" class="hidden" style="margin-top:10px">
+                    <div id="bulkAddForm">
+                        <textarea id="bulkJson" rows="3" placeholder='[{"handle": "alice{{ space.space }}", "script_pubkey": "5120..."}]' class="input-field w-full font-mono" style="margin-bottom:10px"></textarea>
+                        <button type="button" onclick="submitBulk()" class="btn-primary">Stage All</button>
                     </div>
                 </div>
-                <div id="scriptPubkeyField" class="hidden flex-1">
-                    <label class="block text-[11px] font-semibold text-zinc-500 mb-1.5 uppercase tracking-wider">Script Pubkey</label>
-                    <input type="text" id="stageScriptPubkey" placeholder="5120..." class="w-full rounded-lg input-field px-3 py-2 text-sm font-mono transition-all">
-                </div>
-                <button type="button" onclick="toggleScriptPubkey()" class="px-2 py-2 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-surface-300 transition-colors" title="Custom script pubkey">
-                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
-                </button>
-                <button type="submit" class="btn-primary rounded-lg px-4 py-2 text-sm font-medium text-white transition-all duration-200">Stage</button>
             </form>
-            <div class="flex items-center gap-3 mt-3">
-                <button onclick="toggleBulkForm()" class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Bulk add...</button>
-            </div>
-            <div id="bulkForm" class="hidden mt-3 animate-fade-in">
-                <form id="bulkAddForm" class="space-y-3">
-                    <textarea id="bulkJson" rows="3" placeholder='[{"handle": "alice{{ space.space }}", "script_pubkey": "5120..."}]' class="block w-full rounded-lg input-field px-3 py-2 text-sm font-mono transition-all resize-none"></textarea>
-                    <button type="submit" class="btn-primary rounded-lg px-4 py-2 text-sm font-medium text-white transition-all duration-200">Stage All</button>
-                </form>
-            </div>
-            <div id="stageResult" class="hidden mt-3 animate-fade-in"></div>
+            <div id="stageResult" class="hidden" style="margin-top:10px"></div>
         </div>
-        <div class="border-b divider px-6 py-3 flex flex-wrap items-center gap-3">
-            <div class="relative flex-1 min-w-[180px] max-w-xs">
-                <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-                <input type="text" id="handleSearch" placeholder="Search handles..." class="w-full rounded-lg input-field pl-8 pr-3 py-1.5 text-xs transition-all" oninput="onSearchInput()">
+
+        <!-- Filter Bar -->
+        <div class="filter-bar">
+            <div class="search-wrap">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                <input type="text" id="handleSearch" class="search-input" placeholder="Search handles…" oninput="onSearchInput()">
             </div>
-            <div class="flex items-center gap-1.5" id="filterPills">
-                <button onclick="setFilter(null)" class="filter-pill px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors bg-accent-500/20 text-orange-400 border border-accent-500/30" data-filter="">All</button>
-                <button onclick="setFilter('staged')" class="filter-pill px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors text-zinc-500 hover:text-zinc-300 hover:bg-surface-300" data-filter="staged">Staged</button>
-                <button onclick="setFilter('committed')" class="filter-pill px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors text-zinc-500 hover:text-zinc-300 hover:bg-surface-300" data-filter="committed">Committed</button>
-                <button onclick="setFilter('parked')" class="filter-pill px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors text-zinc-500 hover:text-zinc-300 hover:bg-surface-300" data-filter="parked">Parked</button>
-                <button onclick="setFilter('published')" class="filter-pill px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors text-zinc-500 hover:text-zinc-300 hover:bg-surface-300" data-filter="published">Published</button>
-                <button onclick="setFilter('unpublished')" class="filter-pill px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors text-zinc-500 hover:text-zinc-300 hover:bg-surface-300" data-filter="unpublished">Unpublished</button>
+            <div class="filter-tabs" id="filterPills">
+                <button onclick="setFilter(null)" class="filter-tab active" data-filter="">All</button>
+                <button onclick="setFilter('staged')" class="filter-tab" data-filter="staged">Staged</button>
+                <button onclick="setFilter('committed')" class="filter-tab" data-filter="committed">Committed</button>
+                <button onclick="setFilter('parked')" class="filter-tab" data-filter="parked">Parked</button>
+                <button onclick="setFilter('published')" class="filter-tab" data-filter="published">Published</button>
+                <button onclick="setFilter('unpublished')" class="filter-tab" data-filter="unpublished">Unpublished</button>
             </div>
         </div>
-        <div id="selectAllBanner" class="hidden border-b divider px-6 py-2 bg-accent-500/5 text-center">
-            <span class="text-xs text-zinc-400">All <strong class="text-zinc-200" id="bannerPageCount">0</strong> on this page selected.</span>
-            <button onclick="selectAllMatching()" class="ml-2 text-xs text-accent-500 hover:text-accent-400 font-medium">Select all <strong id="bannerTotalCount">0</strong> matching</button>
+
+        <!-- Select All Banner -->
+        <div id="selectAllBanner" class="select-banner hidden">
+            All <strong id="bannerPageCount">0</strong> on this page selected.
+            <button onclick="selectAllMatching()">Select all <strong id="bannerTotalCount">0</strong> matching</button>
         </div>
-        <div id="handlesTable" class="overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead><tr class="border-b divider">
-                    <th class="w-10 py-3 px-3"><input type="checkbox" id="selectAllPage" onchange="togglePageSelection(this.checked)" class="cursor-pointer accent-orange-500"></th>
-                    <th class="text-left py-3 px-6 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Handle</th>
-                    <th class="text-left py-3 px-6 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Script Pubkey</th>
-                    <th class="text-left py-3 px-6 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Batch</th>
-                    <th class="text-left py-3 px-6 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Status</th>
-                </tr></thead>
-                <tbody id="handlesBody" class="divide-y divide-zinc-800">
-                    <tr><td colspan="5" class="py-8 text-center text-zinc-600">Loading...</td></tr>
-                </tbody>
-            </table>
-        </div>
+
+        <!-- Table -->
+        <table class="handles-table">
+            <thead><tr>
+                <th style="width:34px;padding-left:17px"><input type="checkbox" id="selectAllPage" onchange="togglePageSelection(this.checked)" class="handle-checkbox"></th>
+                <th>Handle</th>
+                <th>Script Pubkey</th>
+                <th>Batch</th>
+                <th>Status</th>
+            </tr></thead>
+            <tbody id="handlesBody">
+                <tr><td colspan="5" style="padding:30px 17px;text-align:center;color:var(--text-muted);font-size:13px">Loading...</td></tr>
+            </tbody>
+        </table>
     </div>
 
     <!-- Bulk Action Bar -->
-    <div id="bulkActionBar" class="hidden fixed bottom-14 left-[210px] right-0 z-40 flex items-center justify-center animate-fade-in">
-        <div class="flex items-center gap-4 bg-surface-100 border border-zinc-700 rounded-2xl px-6 py-3 shadow-xl shadow-black/30">
-            <span class="text-sm text-zinc-300"><strong id="bulkCount" class="text-zinc-100 tabular-nums">0</strong> selected</span>
-            <div class="h-5 w-px bg-zinc-700"></div>
+    <div id="bulkActionBar" class="bulk-bar hidden">
+        <div class="bulk-bar-inner">
+            <span class="bulk-bar-count"><strong id="bulkCount">0</strong> selected</span>
+            <span class="bulk-bar-sep"></span>
             <div id="bulkButtons" class="flex items-center gap-2"></div>
-            <div class="h-5 w-px bg-zinc-700"></div>
-            <button onclick="clearSelection()" class="px-3 py-1.5 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Clear</button>
+            <span class="bulk-bar-sep"></span>
+            <button onclick="clearSelection()" class="btn-sm">Clear</button>
         </div>
     </div>
 
-    <!-- Activity -->
-    <div class="card rounded-3xl overflow-hidden">
-        <div class="border-b divider px-6 py-4"><h2 class="text-sm font-semibold text-zinc-300">Activity Log</h2></div>
-        <div class="p-6">
-            <div id="actionsLog" class="space-y-1.5 text-sm text-zinc-500 font-mono max-h-48 overflow-y-auto scrollbar-thin">
-                <p class="text-zinc-600">No activity yet</p>
+    <!-- Activity Log -->
+    <div class="card anim" style="animation-delay:.22s">
+        <div class="section-header"><h3>Activity Log</h3></div>
+        <div class="section-body">
+            <div id="actionsLog" class="activity-log scrollbar-thin">
+                <p style="color:var(--text-muted)">No activity yet</p>
             </div>
         </div>
     </div>
@@ -171,65 +167,629 @@
 
 {% block scripts %}
 <script>
-const space='{{ space.space }}';
-async function refreshPipeline(){try{const r=await fetch(`/spaces/${encodeURIComponent(space)}/pipeline`),j=await r.json();currentPipeline=j;const st=document.getElementById('pipelineStepper'),mg=document.getElementById('pipelineMessage'),ac=document.getElementById('pipelineActions'),pr=document.getElementById('provingEndpoint');updatePublishBar(j.unpublished||0);if(!j.has_pending){const sc=j.staged_count||0;if(sc>0){st.innerHTML=`<div class="flex items-center gap-2.5"><div class="h-8 w-8 rounded-xl bg-amber-500/10 flex items-center justify-center"><svg class="h-4 w-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div><span class="text-sm text-zinc-400"><strong class="text-zinc-200">${sc}</strong> handle${sc>1?'s':''} staged</span></div>`;ac.innerHTML=`<div class="flex gap-2.5"><button onclick="commitLocal()" class="btn-primary rounded-xl px-5 py-2.5 text-sm font-medium text-white transition-all duration-200">Commit Local</button></div>`}else{st.innerHTML=`<div class="flex items-center gap-2.5 text-zinc-500"><div class="h-8 w-8 rounded-xl bg-surface-300 flex items-center justify-center"><svg class="h-4 w-4 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></div><span class="text-sm">Stage handles to start a new commitment</span></div>`;ac.innerHTML=''}mg.textContent='';pr.innerHTML='';loadHandles(currentPage);return}renderStepper(j);renderMessage(j.message,mg);renderActions(j);pr.innerHTML='';if(j.steps.proving==='in_progress'&&j.prover_configured){if(!provingPollActive){provingPollActive=true;setTimeout(refreshPipeline,5000)}}else{provingPollActive=false}loadHandles(currentPage)}catch(e){document.getElementById('pipelineStepper').innerHTML=`<span class="text-red-400 text-sm">${e.message}</span>`}}
+const space = '{{ space.space }}';
+const spaceUrl = `/spaces/${encodeURIComponent(space)}`;
 
-function renderMessage(msg,el){if(!msg){el.innerHTML='';return}const m=msg.match(/^(\d+)\/(\d+)\s+confirmations$/);if(m){const cur=parseInt(m[1]),max=parseInt(m[2]),pct=Math.min((cur/max)*100,100),left=max-cur;el.innerHTML=`<div class="flex items-center gap-3"><div class="flex-1 h-2 bg-surface-300 rounded-full overflow-hidden"><div class="h-full rounded-full transition-all duration-500" style="width:${pct}%;background:linear-gradient(90deg,#f97316,#fb923c)${pct>0?';box-shadow:0 0 8px rgba(249,115,22,0.3)':''}"></div></div><span class="text-xs text-zinc-500 tabular-nums whitespace-nowrap"><span class="text-zinc-300 font-mono">${cur}</span><span class="text-zinc-600">/</span><span class="font-mono">${max}</span></span></div>`}else{el.textContent=msg}}
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let currentPage = 1;
+let perPage = 20;
+let currentPipeline = null;
+let provingPollActive = false;
+let currentFilter = null;
+let searchTimeout = null;
+let selectedHandles = new Set();
+let selectAllMode = false;
+let lastTotal = 0;
+let pageHandleNames = [];
+let handleMeta = {};
 
-function renderActions(r){const a=document.getElementById('pipelineActions');let h='<div class="flex flex-col gap-3">';if(r.current_step==='proving'){if(r.prover_configured){if(r.proving_job_active){const total=r.pending_proofs||0;h+=`<div class="flex items-center gap-2 text-sm text-accent-500 animate-pulse"><svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>Generating proof... <span class="text-zinc-400">(${total} pending)</span></div>`}if(r.estimate){const e=r.estimate;h+='<div class="mt-2 p-3 bg-surface-200 rounded-xl border border-zinc-700/50 space-y-1">';for(const[k,v]of Object.entries(e)){if(v==null||typeof v==='object')continue;const label=k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());const val=typeof v==='number'?v.toLocaleString():String(v);h+=`<div class="text-xs text-zinc-400"><span class="text-zinc-500">${esc(label)}:</span> <span class="text-zinc-300 font-mono">${esc(val)}</span></div>`}h+='</div>'}if(!r.proving_job_active){h+=`<div class="flex gap-2.5 mt-2"><button onclick="startProving()" class="btn-primary rounded-xl px-5 py-2.5 text-sm font-medium text-white transition-all duration-200">Prove</button><button onclick="rollbackLocal()" class="btn-secondary rounded-xl px-5 py-2.5 text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-all duration-200">Rollback</button></div>`}else{h+=`<button onclick="rollbackLocal()" class="mt-2 btn-secondary rounded-xl px-4 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-200 transition-all duration-200">Rollback Local</button>`}}else{h+=`<div class="p-4 bg-amber-500/10 rounded-xl border border-amber-500/20"><div class="flex items-center gap-2 text-sm text-amber-400 font-medium"><svg class="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>Prover not configured</div><p class="text-xs text-zinc-400 mt-1.5">Run <span class="font-mono text-zinc-300">subs-prover --server</span> and configure the endpoint in <a href="/settings" class="text-accent-500 hover:underline">Settings</a>.</p></div>`}}else{if(r.current_step==='broadcast'){h+=`<div class="flex gap-2.5"><button onclick="broadcast()" class="btn-primary rounded-xl px-5 py-2.5 text-sm font-medium text-white transition-all duration-200">Broadcast On-Chain</button><button onclick="rollbackLocal()" class="btn-secondary rounded-xl px-5 py-2.5 text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-all duration-200">Rollback</button></div>`}}h+='</div>';a.innerHTML=h}
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function esc(t) {
+    const d = document.createElement('div');
+    d.textContent = t;
+    return d.innerHTML;
+}
 
-function updatePublishBar(n){const bar=document.getElementById('publishBar'),lbl=document.getElementById('publishLabel');if(n>0){const batch=Math.min(n,100);lbl.textContent=`Publish ${batch}/${n} Certificates`;bar.classList.remove('hidden')}else{bar.classList.add('hidden')}}
+function $(id) { return document.getElementById(id); }
 
-function renderStepper(r){const steps=[{key:'local',label:'Local',ic:'M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z'},{key:'proving',label:'Proving',ic:'M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z'},{key:'broadcast',label:'Broadcast',ic:'M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5'},{key:'confirmed',label:'Confirmed',ic:'M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z'},{key:'finalized',label:'Finalized',ic:'M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z'}];
-const vis=steps.filter(s=>r.steps[s.key]!=='skipped');let h='<div class="flex items-center">';vis.forEach((s,i)=>{const st=r.steps[s.key];if(i>0){const pc=r.steps[vis[i-1].key]==='complete'?'bg-emerald-500/50':'bg-zinc-700';h+=`<div class="flex-1 h-px ${pc} mx-1"></div>`}let bg,ic,lbl;if(st==='complete'){bg='bg-emerald-500/10 border border-emerald-500/20';ic='text-emerald-400';lbl='text-emerald-400 font-semibold'}else if(st==='in_progress'){bg='bg-accent-500/10 border border-accent-500/20 shimmer';ic='text-accent-500';lbl='text-accent-500 font-semibold'}else{bg='bg-surface-300 border border-zinc-600';ic='text-zinc-500';lbl='text-zinc-500'}
-h+=`<div class="flex flex-col items-center min-w-[60px]"><div class="flex h-10 w-10 items-center justify-center rounded-2xl ${bg}">${st==='complete'?'<svg class="h-5 w-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>':`<svg class="h-4 w-4 ${ic}" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="${s.ic}"/></svg>`}</div><span class="text-[11px] mt-1.5 ${lbl}">${s.label}</span></div>`});h+='</div>';
-if(r.commitment_idx!=null){h+=`<div class="mt-5 p-4 bg-surface-200 rounded-xl border border-zinc-700/50 space-y-1.5"><div class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Commitment #${r.commitment_idx}</div>`;if(r.root)h+=`<div class="text-xs"><span class="text-zinc-500">Root: </span><span class="text-zinc-300 font-mono select-all">${r.root}</span></div>`;if(r.txid)h+=`<div class="text-xs"><span class="text-zinc-500">Txid: </span><span class="text-zinc-300 font-mono select-all">${r.txid}</span></div>`;h+='</div>'}document.getElementById('pipelineStepper').innerHTML=h}
+async function api(path, opts) {
+    const r = await fetch(path, opts);
+    const j = await r.json();
+    return { ok: r.ok, data: j };
+}
 
-async function commitLocal(){logAction('Committing...');try{const r=await fetch(`/spaces/${encodeURIComponent(space)}/commit`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dry_run:false})}),j=await r.json();if(r.ok){logAction(`Committed ${j.handles_committed} handles`);location.reload()}else logAction(`Error: ${JSON.stringify(j)}`)}catch(e){logAction(e.message)}}
+function postJson(path, body) {
+    return api(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+}
 
-async function broadcast(){let f=null;try{const r=await fetch('/fees');if(r.ok)f=await r.json()}catch(e){}let p='Fee rate (sat/vB):\n\n';if(f)p+=`Fastest: ${f.fastestFee} | Half hour: ${f.halfHourFee} | Hour: ${f.hourFee} | Economy: ${f.economyFee}\n\n`;p+='Empty for wallet estimate:';const i=prompt(p);if(i===null)return;const fr=i.trim()===''?null:parseFloat(i);logAction(`Broadcasting${fr?' at '+fr+' sat/vB':''}...`);try{const r=await fetch(`/spaces/${encodeURIComponent(space)}/broadcast`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(fr?{fee_rate:fr}:{})}),j=await r.json();if(r.ok){logAction(`TX: ${j.txid}`);refreshPipeline()}else logAction(`Error: ${j.error||JSON.stringify(j)}`)}catch(e){logAction(e.message)}}
+function logAction(msg) {
+    const log = $('actionsLog');
+    const t = new Date().toLocaleTimeString();
+    const p = document.createElement('p');
+    p.className = 'anim';
+    p.textContent = `[${t}] ${msg}`;
+    log.insertBefore(p, log.firstChild);
+    const placeholder = log.querySelector('p[style]');
+    if (placeholder && placeholder.textContent === 'No activity yet') placeholder.remove();
+}
 
-async function startProving(){logAction('Submitting proving request...');try{const r=await fetch(`/spaces/${encodeURIComponent(space)}/proving/push`,{method:'POST'}),j=await r.json();if(r.ok&&j.success){logAction(`Proving job submitted: ${j.job_id}`);refreshPipeline()}else logAction(`Error: ${j.message||JSON.stringify(j)}`)}catch(e){logAction(e.message)}}
+// ---------------------------------------------------------------------------
+// Pipeline
+// ---------------------------------------------------------------------------
+const STAGE_SVG = {
+    clock: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+    plus:  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4.5v15m7.5-7.5h-15"/></svg>',
+    check: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>',
+};
 
-async function rollbackLocal(){if(!confirm('Rollback the last local commitment? Handles will return to staged.'))return;logAction('Rolling back...');try{const r=await fetch(`/spaces/${encodeURIComponent(space)}/rollback-local`,{method:'POST'}),j=await r.json();if(r.ok){logAction('Rolled back successfully');location.reload()}else logAction(`Error: ${j.error||JSON.stringify(j)}`)}catch(e){logAction(e.message)}}
+const PIPELINE_STEPS = [
+    { key: 'local',     label: 'Local',     svg: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/></svg>' },
+    { key: 'proving',   label: 'Proving',   svg: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>' },
+    { key: 'broadcast', label: 'Broadcast', svg: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>' },
+    { key: 'confirmed', label: 'Confirmed', svg: STAGE_SVG.check },
+    { key: 'finalized', label: 'Finalized', svg: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' },
+];
 
-async function publishCerts(){logAction('Publishing certificates...');try{const r=await fetch(`/spaces/${encodeURIComponent(space)}/publish`,{method:'POST'}),j=await r.json();if(r.ok){const msg=j.handles_published>0?`Published ${j.handles_published} certificate${j.handles_published>1?'s':''}${j.remaining>0?` (${j.remaining} remaining)`:''}`:'None to publish';logAction(msg);refreshPipeline()}else{logAction(`Error: ${j.error||JSON.stringify(j)}`)}}catch(e){logAction(e.message)}}
+async function refreshPipeline() {
+    try {
+        const { data: j } = await api(`${spaceUrl}/pipeline`);
+        currentPipeline = j;
+        const stepper = $('pipelineStepper');
+        const msg = $('pipelineMessage');
+        const actions = $('pipelineActions');
 
-function logAction(m){const l=document.getElementById('actionsLog'),t=new Date().toLocaleTimeString(),e=document.createElement('p');e.className='animate-fade-in';e.textContent=`[${t}] ${m}`;l.insertBefore(e,l.firstChild);const p=l.querySelector('.text-zinc-600');if(p&&p.textContent==='No activity yet')p.remove()}
+        updatePublishBar(j.unpublished || 0);
 
-let currentPage=1,perPage=20,currentPipeline=null,provingPollActive=false,currentFilter=null,searchTimeout=null,selectedHandles=new Set(),selectAllMode=false,lastTotal=0,pageHandleNames=[],handleMeta={};
-function setFilter(f){currentFilter=f;currentPage=1;document.querySelectorAll('.filter-pill').forEach(b=>{const bf=b.dataset.filter;if((f===null&&bf==='')||bf===f){b.className='filter-pill active px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors bg-accent-500/20 text-orange-400 border border-accent-500/30'}else{b.className='filter-pill px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors text-zinc-500 hover:text-zinc-300 hover:bg-surface-300'}});loadHandles(1)}
-function onSearchInput(){clearTimeout(searchTimeout);searchTimeout=setTimeout(()=>{currentPage=1;loadHandles(1)},300)}
-async function loadHandles(pg=1){currentPage=pg;try{const q=new URLSearchParams({page:pg,per_page:perPage});const s=document.getElementById('handleSearch')?.value?.trim();if(s)q.set('search',s);if(currentFilter)q.set('filter',currentFilter);const r=await fetch(`/spaces/${encodeURIComponent(space)}/handles?${q}`);if(!r.ok){document.getElementById('handlesBody').innerHTML=`<tr><td colspan="4" class="py-8 text-center text-red-400 text-sm">Failed to load handles</td></tr>`;return}const j=await r.json();renderTable(j);renderPag(j)}catch(e){document.getElementById('handlesBody').innerHTML=`<tr><td colspan="4" class="py-8 text-center text-red-400 text-sm">${e.message}</td></tr>`}}
+        if (!j.has_pending) {
+            const sc = j.staged_count || 0;
+            if (sc > 0) {
+                stepper.innerHTML = `<div class="flex items-center gap-3">
+                    <div class="stage-icon active">${STAGE_SVG.clock}</div>
+                    <span style="font-size:13px;color:var(--text-secondary)">
+                        <strong style="color:var(--text-primary)">${sc}</strong> handle${sc > 1 ? 's' : ''} staged
+                    </span></div>`;
+                actions.innerHTML = '<button onclick="commitLocal()" class="btn-primary">Commit Local</button>';
+            } else {
+                stepper.innerHTML = `<div class="flex items-center gap-3">
+                    <div class="stage-icon waiting">${STAGE_SVG.plus}</div>
+                    <span style="font-size:13px;color:var(--text-muted)">Stage handles to start a new commitment</span></div>`;
+                actions.innerHTML = '';
+            }
+            msg.textContent = '';
+            $('provingEndpoint').innerHTML = '';
+            loadHandles(currentPage);
+            return;
+        }
 
-function parkedBadge(h){return h.parked?' <span class="rounded-lg px-2 py-0.5 text-[11px] font-medium text-rose-400 bg-rose-500/10 border border-rose-500/20">Parked</span>':''}
-function badge(h){const pb=pubBadge(h.publish_status)+parkedBadge(h);if(!h.commitment_root)return'<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-medium text-zinc-400">Staged</span>'+pb;if(currentPipeline&&currentPipeline.root===h.commitment_root){const s=currentPipeline.steps;if(s.finalized==='complete')return'<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-medium text-emerald-400">Finalized</span>'+pb;if(s.confirmed==='complete'||s.confirmed==='in_progress')return'<span class="rounded-lg px-2 py-0.5 text-[11px] font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20 animate-pulse">Confirming</span>'+pb;if(s.broadcast==='complete'||s.broadcast==='in_progress')return'<span class="rounded-lg px-2 py-0.5 text-[11px] font-medium text-accent-500 bg-accent-500/10 border border-accent-500/20 animate-pulse">Broadcast</span>'+pb;if(s.proving==='in_progress')return'<span class="rounded-lg px-2 py-0.5 text-[11px] font-medium text-violet-400 bg-violet-500/10 border border-violet-500/20 animate-pulse">Proving</span>'+pb;return'<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-medium text-zinc-400 animate-pulse">Pending</span>'+pb}return'<span class="badge rounded-lg px-2 py-0.5 text-[11px] font-medium text-emerald-400">Finalized</span>'+pb}
+        renderStepper(j);
+        renderMessage(j.message, msg);
+        renderActions(j);
+        $('provingEndpoint').innerHTML = '';
 
-function pubBadge(s){if(s==='final')return' <span class="rounded-lg px-2 py-0.5 text-[11px] font-medium text-blue-400 bg-blue-500/10 border border-blue-500/20">Published</span>';if(s==='temp')return' <span class="rounded-lg px-2 py-0.5 text-[11px] font-medium text-purple-400 bg-purple-500/10 border border-purple-500/20">Temp Cert</span>';return''}
+        if (j.steps.proving === 'in_progress' && j.prover_configured) {
+            if (!provingPollActive) {
+                provingPollActive = true;
+                setTimeout(refreshPipeline, 5000);
+            }
+        } else {
+            provingPollActive = false;
+        }
+        loadHandles(currentPage);
+    } catch (e) {
+        $('pipelineStepper').innerHTML = `<span style="color:var(--red);font-size:13px">${e.message}</span>`;
+    }
+}
 
-function renderTable(r){const tb=document.getElementById('handlesBody');pageHandleNames=[];lastTotal=r.total||0;if(!r.handles||!r.handles.length){tb.innerHTML='<tr><td colspan="5" class="py-8 text-center text-zinc-600 text-sm">No handles</td></tr>';updateBulkBar();return}pageHandleNames=r.handles.map(h=>h.name);r.handles.forEach(h=>{handleMeta[h.name]={staged:!h.commitment_root,parked:!!h.parked,published:!!h.publish_status}});tb.innerHTML=r.handles.map(h=>{const chk=selectedHandles.has(h.name)||selectAllMode?'checked':'';return`<tr class="hover:bg-surface-200 transition-colors cursor-pointer" onclick="location.href='/ui/spaces/${encodeURIComponent(space)}/handles/${encodeURIComponent(h.name)}'"><td class="w-10 py-3 px-3" onclick="event.stopPropagation()"><input type="checkbox" ${chk} onchange="toggleHandle('${esc(h.name)}',this.checked)" class="cursor-pointer accent-orange-500"></td><td class="py-3 px-6 font-mono text-sm text-accent-500 hover:text-accent-400 font-medium">${esc(h.name)}</td><td class="py-3 px-6 font-mono text-xs text-zinc-500"><span title="${h.script_pubkey}">${h.script_pubkey.slice(0,16)}...${h.script_pubkey.slice(-8)}</span></td><td class="py-3 px-6 font-mono text-xs text-zinc-400">${h.commitment_idx!=null?'#'+h.commitment_idx:'<span class="text-zinc-600">-</span>'}</td><td class="py-3 px-6">${badge(h)}</td></tr>`}).join('');const hdr=document.getElementById('selectAllPage');if(hdr)hdr.checked=selectAllMode||pageHandleNames.every(n=>selectedHandles.has(n));updateBulkBar()}
+function renderMessage(msg, el) {
+    if (!msg) { el.innerHTML = ''; return; }
+    const m = msg.match(/^(\d+)\/(\d+)\s+confirmations$/);
+    if (m) {
+        const cur = parseInt(m[1]), max = parseInt(m[2]);
+        const pct = Math.min((cur / max) * 100, 100);
+        el.innerHTML = `<div class="progress-row">
+            <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+            <div class="progress-label"><span>${cur}</span> / ${max} blocks</div></div>`;
+    } else {
+        el.textContent = msg;
+    }
+}
 
-function renderPag(r){const c=document.getElementById('handlesPagination');if(r.total_pages<=1){c.innerHTML=`<span class="text-xs text-zinc-500">${r.total} handle${r.total!==1?'s':''}</span>`;return}c.innerHTML=`<span class="text-xs text-zinc-500">${r.total} handles</span><div class="flex items-center gap-0.5 ml-3"><button onclick="loadHandles(${currentPage-1})" class="px-2 py-1 rounded-lg text-xs text-zinc-400 hover:bg-surface-300 disabled:opacity-30 transition-colors" ${currentPage<=1?'disabled':''}>&larr;</button><span class="px-2 text-xs text-zinc-500 tabular-nums">${r.page}/${r.total_pages}</span><button onclick="loadHandles(${currentPage+1})" class="px-2 py-1 rounded-lg text-xs text-zinc-400 hover:bg-surface-300 disabled:opacity-30 transition-colors" ${currentPage>=r.total_pages?'disabled':''}>&rarr;</button></div>`}
+function renderStepper(r) {
+    const visible = PIPELINE_STEPS.filter(s => r.steps[s.key] !== 'skipped');
+    let h = '<div class="pipeline-stages">';
 
-function esc(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML}
+    visible.forEach((s, i) => {
+        const st = r.steps[s.key];
 
-function toggleStageForm(){document.getElementById('stageForm').classList.toggle('hidden')}
-function toggleScriptPubkey(){document.getElementById('scriptPubkeyField').classList.toggle('hidden')}
-function toggleBulkForm(){document.getElementById('bulkForm').classList.toggle('hidden')}
-function showStageResult(msg,ok){const el=document.getElementById('stageResult');el.className=`mt-3 p-3 rounded-lg text-sm animate-fade-in ${ok?'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20':'bg-red-500/10 text-red-400 border border-red-500/20'}`;el.textContent=msg;el.classList.remove('hidden');if(ok)setTimeout(()=>el.classList.add('hidden'),3000)}
+        // Connector between stages
+        if (i > 0) {
+            const prev = r.steps[visible[i - 1].key];
+            const filled = prev === 'complete';
+            const partial = filled && st !== 'complete';
+            h += `<div class="stage-connector${partial ? ' partial' : ''}">
+                ${filled ? '<div class="fill"></div>' : ''}</div>`;
+        }
 
-document.getElementById('addHandleForm').addEventListener('submit',async e=>{e.preventDefault();const name=document.getElementById('stageHandle').value.trim(),spk=document.getElementById('stageScriptPubkey').value.trim(),handle=name+'{{ space.space }}',reqs=[{handle,script_pubkey:spk||undefined}];if(!spk){try{const g=await fetch('/requests/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({handle})});if(!g.ok){showStageResult(JSON.stringify((await g.json()).error||'Failed'),false);return}const r=await g.json();reqs[0]=r.request}catch(e){showStageResult(e.message,false);return}}try{const res=await fetch('/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requests:reqs})}),j=await res.json();if(res.ok){showStageResult(`Staged ${handle}`,true);document.getElementById('stageHandle').value='';document.getElementById('stageScriptPubkey').value='';refreshPipeline();loadHandles(currentPage)}else showStageResult(j.error||JSON.stringify(j),false)}catch(e){showStageResult(e.message,false)}});
+        // Stage icon + label
+        const iconCls = st === 'complete' ? 'done'
+            : st === 'in_progress' ? 'active shimmer' : 'waiting';
+        const labelCls = st === 'complete' ? 'done-l'
+            : st === 'in_progress' ? 'active-l' : '';
+        const icon = st === 'complete' ? STAGE_SVG.check : s.svg;
 
-document.getElementById('bulkAddForm').addEventListener('submit',async e=>{e.preventDefault();try{const reqs=JSON.parse(document.getElementById('bulkJson').value);const res=await fetch('/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requests:reqs})}),j=await res.json();if(res.ok){showStageResult(`Staged ${reqs.length} handle(s)`,true);document.getElementById('bulkJson').value='';refreshPipeline();loadHandles(currentPage)}else showStageResult(j.error||JSON.stringify(j),false)}catch(e){showStageResult(`Invalid JSON: ${e.message}`,false)}});
+        h += `<div class="stage">
+            <div class="stage-icon ${iconCls}">${icon}</div>
+            <div class="stage-label ${labelCls}">${s.label}</div></div>`;
+    });
+    h += '</div>';
 
-function toggleHandle(name,checked){selectAllMode=false;if(checked)selectedHandles.add(name);else selectedHandles.delete(name);const hdr=document.getElementById('selectAllPage');if(hdr)hdr.checked=pageHandleNames.length>0&&pageHandleNames.every(n=>selectedHandles.has(n));updateBulkBar()}
-function togglePageSelection(checked){selectAllMode=false;pageHandleNames.forEach(n=>{if(checked)selectedHandles.add(n);else selectedHandles.delete(n)});document.querySelectorAll('#handlesBody input[type=checkbox]').forEach(cb=>cb.checked=checked);const banner=document.getElementById('selectAllBanner');if(checked&&lastTotal>pageHandleNames.length){document.getElementById('bannerPageCount').textContent=pageHandleNames.length;document.getElementById('bannerTotalCount').textContent=lastTotal;banner.classList.remove('hidden')}else{banner.classList.add('hidden')}updateBulkBar()}
-function selectAllMatching(){selectAllMode=true;document.querySelectorAll('#handlesBody input[type=checkbox]').forEach(cb=>cb.checked=true);document.getElementById('selectAllBanner').classList.add('hidden');updateBulkBar()}
-function clearSelection(){selectAllMode=false;selectedHandles.clear();document.querySelectorAll('#handlesBody input[type=checkbox]').forEach(cb=>cb.checked=false);const hdr=document.getElementById('selectAllPage');if(hdr)hdr.checked=false;document.getElementById('selectAllBanner').classList.add('hidden');updateBulkBar()}
-function updateBulkBar(){const n=selectAllMode?lastTotal:selectedHandles.size;const bar=document.getElementById('bulkActionBar');const btns=document.getElementById('bulkButtons');document.getElementById('bulkCount').textContent=n;if(n<=0){bar.classList.add('hidden');return}bar.classList.remove('hidden');let allStaged=true,allParked=true,noneParked=true,allPublished=true,nonePublished=true;if(selectAllMode){const f=currentFilter;allStaged=!f||f==='staged'||f==='parked';allParked=f==='parked';noneParked=f==='staged'||f==='unpublished'||f==='committed';allPublished=f==='published';nonePublished=f==='unpublished'||f==='staged'||f==='parked'}else{for(const name of selectedHandles){const m=handleMeta[name];if(!m)continue;if(!m.staged)allStaged=false;if(!m.parked)allParked=false;if(m.parked)noneParked=false;if(!m.published)allPublished=false;if(m.published)nonePublished=false}}const btn=(label,action)=>`<button onclick="bulkAction('${action}')" class="px-4 py-1.5 rounded-lg text-xs font-medium text-zinc-300 bg-surface-300 border border-zinc-600 hover:bg-surface-400 hover:border-zinc-500 transition-colors">${label}</button>`;let h='';if(allStaged){if(noneParked)h+=btn('Park','park');else if(allParked)h+=btn('Unpark','unpark');else h+=btn('Park','park')+btn('Unpark','unpark')}h+=btn(allPublished&&!nonePublished?'Republish':'Publish','publish');btns.innerHTML=h}
-function getSelectionContext(){const ctx={};if(selectAllMode){const s=document.getElementById('handleSearch')?.value?.trim();if(s)ctx.search=s;if(currentFilter)ctx.filter=currentFilter;ctx._count=lastTotal}else{ctx.handles=[...selectedHandles];ctx._count=ctx.handles.length}return ctx}
-async function bulkAction(action){const ctx=getSelectionContext();const n=ctx._count;delete ctx._count;const labels={park:'Parking',unpark:'Unparking',publish:'Publishing'};logAction(`${labels[action]||action} ${n} handle(s)...`);try{let url,body;if(action==='park'||action==='unpark'){url=`/spaces/${encodeURIComponent(space)}/park`;body={...ctx,parked:action==='park'}}else{url=`/spaces/${encodeURIComponent(space)}/publish`;body={};if(!selectAllMode&&ctx.handles)body.handles=ctx.handles}const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),j=await r.json();if(r.ok){if(action==='park'||action==='unpark')logAction(`${action==='park'?'Parked':'Unparked'} ${j.updated} handle(s)`);else logAction(`Published ${j.handles_published} certificate(s)${j.remaining>0?' ('+j.remaining+' remaining)':''}`);clearSelection();loadHandles(currentPage);refreshPipeline()}else logAction(`Error: ${j.error||JSON.stringify(j)}`)}catch(e){logAction(e.message)}}
+    // Commitment detail
+    if (r.commitment_idx != null) {
+        h += `<div class="commitment-detail">
+            <span class="commitment-tag">Commitment #${r.commitment_idx}</span>`;
+        if (r.root) h += `<div class="hash-row"><span class="hash-label">Root</span>
+            <span class="hash-value">${r.root}</span>
+            <button class="hash-copy" onclick="copyToClipboard('${r.root}',this)">copy</button></div>`;
+        if (r.txid) h += `<div class="hash-row"><span class="hash-label">Txid</span>
+            <span class="hash-value">${r.txid}</span>
+            <button class="hash-copy" onclick="copyToClipboard('${r.txid}',this)">copy</button></div>`;
+        h += '</div>';
+    }
 
+    $('pipelineStepper').innerHTML = h;
+}
+
+function renderActions(r) {
+    const el = $('pipelineActions');
+    let h = '';
+
+    if (r.current_step === 'proving') {
+        if (r.prover_configured) {
+            if (r.proving_job_active) {
+                const total = r.pending_proofs || 0;
+                h += `<div class="flex items-center gap-2" style="color:var(--accent)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" class="animate-spin">
+                        <circle opacity="0.25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                        <path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                    <span style="font-size:13px">Generating proof...
+                        <span style="color:var(--text-muted)">(${total} pending)</span></span></div>`;
+            }
+            if (r.estimate) {
+                h += '<div style="margin-top:10px;padding:12px;background:var(--bg-base);border:1px solid var(--border-subtle);border-radius:8px">';
+                for (const [k, v] of Object.entries(r.estimate)) {
+                    if (v == null || typeof v === 'object') continue;
+                    const label = k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                    const val = typeof v === 'number' ? v.toLocaleString() : String(v);
+                    h += `<div style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:2px">
+                        <span>${esc(label)}:</span> <span style="color:var(--text-secondary)">${esc(val)}</span></div>`;
+                }
+                h += '</div>';
+            }
+            if (!r.proving_job_active) {
+                h += `<div class="flex gap-3" style="margin-top:10px">
+                    <button onclick="startProving()" class="btn-primary">Prove</button>
+                    <button onclick="rollbackLocal()" class="btn-secondary">Rollback</button></div>`;
+            } else {
+                h += '<button onclick="rollbackLocal()" class="btn-sm" style="margin-top:10px">Rollback Local</button>';
+            }
+        } else {
+            h += `<div class="alert alert-warning">
+                <div class="flex items-center gap-2" style="font-weight:600;margin-bottom:4px">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                    Prover not configured</div>
+                <p style="font-size:12px;color:var(--text-muted)">Run <span style="color:var(--text-primary)">subs-prover --server</span>
+                    and configure the endpoint in <a href="/ui/settings" style="color:var(--accent)">Settings</a>.</p></div>`;
+        }
+    } else if (r.current_step === 'broadcast') {
+        h += `<div class="flex gap-3">
+            <button onclick="broadcast()" class="btn-primary">Broadcast On-Chain</button>
+            <button onclick="rollbackLocal()" class="btn-secondary">Rollback</button></div>`;
+    }
+
+    el.innerHTML = h;
+}
+
+function updatePublishBar(n) {
+    const bar = $('publishBar');
+    if (n > 0) {
+        const batch = Math.min(n, 100);
+        const label = batch < n ? `${batch}/${n}` : `${n}`;
+        bar.innerHTML = `⊕ Publish <span class="count">${label}</span>`;
+        bar.classList.remove('hidden');
+    } else {
+        bar.classList.add('hidden');
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline actions
+// ---------------------------------------------------------------------------
+async function commitLocal() {
+    logAction('Committing...');
+    try {
+        const { ok, data } = await postJson(`${spaceUrl}/commit`, { dry_run: false });
+        if (ok) { logAction(`Committed ${data.handles_committed} handles`); location.reload(); }
+        else logAction(`Error: ${JSON.stringify(data)}`);
+    } catch (e) { logAction(e.message); }
+}
+
+async function broadcast() {
+    let fees = null;
+    try { const r = await fetch('/fees'); if (r.ok) fees = await r.json(); } catch (_) {}
+
+    let prompt_text = 'Fee rate (sat/vB):\n\n';
+    if (fees) prompt_text += `Fastest: ${fees.fastestFee} | Half hour: ${fees.halfHourFee} | Hour: ${fees.hourFee} | Economy: ${fees.economyFee}\n\n`;
+    prompt_text += 'Empty for wallet estimate:';
+
+    const input = prompt(prompt_text);
+    if (input === null) return;
+    const feeRate = input.trim() === '' ? null : parseFloat(input);
+
+    logAction(`Broadcasting${feeRate ? ' at ' + feeRate + ' sat/vB' : ''}...`);
+    try {
+        const { ok, data } = await postJson(`${spaceUrl}/broadcast`, feeRate ? { fee_rate: feeRate } : {});
+        if (ok) { logAction(`TX: ${data.txid}`); refreshPipeline(); }
+        else logAction(`Error: ${data.error || JSON.stringify(data)}`);
+    } catch (e) { logAction(e.message); }
+}
+
+async function startProving() {
+    logAction('Submitting proving request...');
+    try {
+        const { ok, data } = await api(`${spaceUrl}/proving/push`, { method: 'POST' });
+        if (ok && data.success) { logAction(`Proving job submitted: ${data.job_id}`); refreshPipeline(); }
+        else logAction(`Error: ${data.message || JSON.stringify(data)}`);
+    } catch (e) { logAction(e.message); }
+}
+
+async function rollbackLocal() {
+    if (!confirm('Rollback the last local commitment? Handles will return to staged.')) return;
+    logAction('Rolling back...');
+    try {
+        const { ok, data } = await postJson(`${spaceUrl}/rollback-local`, {});
+        if (ok) { logAction('Rolled back successfully'); location.reload(); }
+        else logAction(`Error: ${data.error || JSON.stringify(data)}`);
+    } catch (e) { logAction(e.message); }
+}
+
+async function publishCerts() {
+    logAction('Publishing certificates...');
+    try {
+        const { ok, data } = await api(`${spaceUrl}/publish`, { method: 'POST' });
+        if (ok) {
+            const msg = data.handles_published > 0
+                ? `Published ${data.handles_published} certificate${data.handles_published > 1 ? 's' : ''}${data.remaining > 0 ? ` (${data.remaining} remaining)` : ''}`
+                : 'None to publish';
+            logAction(msg);
+            refreshPipeline();
+        } else {
+            logAction(`Error: ${data.error || JSON.stringify(data)}`);
+        }
+    } catch (e) { logAction(e.message); }
+}
+
+// ---------------------------------------------------------------------------
+// Handles table
+// ---------------------------------------------------------------------------
+function setFilter(f) {
+    currentFilter = f;
+    currentPage = 1;
+    document.querySelectorAll('.filter-tab').forEach(b => {
+        const bf = b.dataset.filter;
+        b.className = (f === null && bf === '') || bf === f ? 'filter-tab active' : 'filter-tab';
+    });
+    loadHandles(1);
+}
+
+function onSearchInput() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => { currentPage = 1; loadHandles(1); }, 300);
+}
+
+async function loadHandles(pg = 1) {
+    currentPage = pg;
+    const errRow = msg => `<tr><td colspan="5" style="padding:30px 17px;text-align:center;color:var(--red);font-size:13px">${msg}</td></tr>`;
+    try {
+        const q = new URLSearchParams({ page: pg, per_page: perPage });
+        const search = $('handleSearch')?.value?.trim();
+        if (search) q.set('search', search);
+        if (currentFilter) q.set('filter', currentFilter);
+
+        const r = await fetch(`${spaceUrl}/handles?${q}`);
+        if (!r.ok) { $('handlesBody').innerHTML = errRow('Failed to load handles'); return; }
+        const data = await r.json();
+        renderTable(data);
+        renderPagination(data);
+    } catch (e) {
+        $('handlesBody').innerHTML = errRow(e.message);
+    }
+}
+
+function badge(h) {
+    const extra = pubBadge(h.publish_status) + parkedBadge(h);
+    if (!h.commitment_root) return '<span class="status-badge status-staged">Staged</span>' + extra;
+
+    if (currentPipeline && currentPipeline.root === h.commitment_root) {
+        const s = currentPipeline.steps;
+        if (s.finalized === 'complete')                          return '<span class="status-badge status-finalized">Finalized</span>' + extra;
+        if (s.confirmed === 'complete' || s.confirmed === 'in_progress') return '<span class="status-badge status-confirming">Confirming</span>' + extra;
+        if (s.broadcast === 'complete' || s.broadcast === 'in_progress') return '<span class="status-badge status-broadcast">Broadcast</span>' + extra;
+        if (s.proving === 'in_progress')                         return '<span class="status-badge status-proving">Proving</span>' + extra;
+        return '<span class="status-badge status-pending">Pending</span>' + extra;
+    }
+    return '<span class="status-badge status-finalized">Finalized</span>' + extra;
+}
+
+function pubBadge(s) {
+    if (s === 'final') return ' <span class="status-badge status-published">Published</span>';
+    if (s === 'temp')  return ' <span class="status-badge status-temp">Temp Cert</span>';
+    return '';
+}
+
+function parkedBadge(h) {
+    return h.parked ? ' <span class="status-badge status-parked">Parked</span>' : '';
+}
+
+function renderTable(r) {
+    const tbody = $('handlesBody');
+    pageHandleNames = [];
+    lastTotal = r.total || 0;
+
+    if (!r.handles || !r.handles.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding:30px 17px;text-align:center;color:var(--text-muted);font-size:13px">No handles</td></tr>';
+        updateBulkBar();
+        return;
+    }
+
+    pageHandleNames = r.handles.map(h => h.name);
+    r.handles.forEach(h => {
+        handleMeta[h.name] = { staged: !h.commitment_root, parked: !!h.parked, published: !!h.publish_status };
+    });
+
+    tbody.innerHTML = r.handles.map(h => {
+        const chk = selectedHandles.has(h.name) || selectAllMode ? 'checked' : '';
+        const href = `/ui/spaces/${encodeURIComponent(space)}/handles/${encodeURIComponent(h.name)}`;
+        const spk = h.script_pubkey;
+        return `<tr style="cursor:pointer" onclick="location.href='${href}'">
+            <td style="padding-left:17px" onclick="event.stopPropagation()">
+                <input type="checkbox" ${chk} onchange="toggleHandle('${esc(h.name)}',this.checked)" class="handle-checkbox"></td>
+            <td><span class="handle-name">${esc(h.name)}</span></td>
+            <td><span class="handle-pubkey" title="${spk}">${spk.slice(0, 16)}…${spk.slice(-8)}</span></td>
+            <td><span class="handle-batch">${h.commitment_idx != null ? '#' + h.commitment_idx : '—'}</span></td>
+            <td>${badge(h)}</td></tr>`;
+    }).join('');
+
+    const hdr = $('selectAllPage');
+    if (hdr) hdr.checked = selectAllMode || pageHandleNames.every(n => selectedHandles.has(n));
+    updateBulkBar();
+}
+
+function renderPagination(r) {
+    const el = $('handlesPagination');
+    if (r.total_pages <= 1) {
+        el.innerHTML = `<span style="color:var(--text-muted)">${r.total} handle${r.total !== 1 ? 's' : ''}</span>`;
+        return;
+    }
+    el.innerHTML = `<span style="color:var(--text-muted)">${r.total} handles</span>
+        <div class="flex items-center gap-1" style="margin-left:10px">
+            <button onclick="loadHandles(${currentPage - 1})" class="btn-sm" ${currentPage <= 1 ? 'disabled' : ''}>&larr;</button>
+            <span style="color:var(--text-muted);font-family:var(--mono);font-size:11px;padding:0 6px">${r.page}/${r.total_pages}</span>
+            <button onclick="loadHandles(${currentPage + 1})" class="btn-sm" ${currentPage >= r.total_pages ? 'disabled' : ''}>&rarr;</button></div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Stage form
+// ---------------------------------------------------------------------------
+function toggleStageForm()   { $('stageForm').classList.toggle('hidden'); }
+function toggleScriptPubkey() { $('scriptPubkeyField').classList.toggle('hidden'); }
+function toggleBulkForm()    { $('bulkForm').classList.toggle('hidden'); }
+
+function showStageResult(msg, ok) {
+    const el = $('stageResult');
+    el.className = `alert ${ok ? 'alert-success' : 'alert-error'}`;
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    if (ok) setTimeout(() => el.classList.add('hidden'), 3000);
+}
+
+$('addHandleForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const name = $('stageHandle').value.trim();
+    const spk = $('stageScriptPubkey').value.trim();
+    const handle = name + '{{ space.space }}';
+    const reqs = [{ handle, script_pubkey: spk || undefined }];
+
+    if (!spk) {
+        try {
+            const { ok, data } = await postJson('/requests/generate', { handle });
+            if (!ok) { showStageResult(JSON.stringify(data.error || 'Failed'), false); return; }
+            reqs[0] = data.request;
+        } catch (e) { showStageResult(e.message, false); return; }
+    }
+
+    try {
+        const { ok, data } = await postJson('/requests', { requests: reqs });
+        if (ok) {
+            showStageResult(`Staged ${handle}`, true);
+            $('stageHandle').value = '';
+            $('stageScriptPubkey').value = '';
+            refreshPipeline();
+            loadHandles(currentPage);
+        } else {
+            showStageResult(data.error || JSON.stringify(data), false);
+        }
+    } catch (e) { showStageResult(e.message, false); }
+});
+
+async function submitBulk() {
+    try {
+        const reqs = JSON.parse($('bulkJson').value);
+        const { ok, data } = await postJson('/requests', { requests: reqs });
+        if (ok) {
+            showStageResult(`Staged ${reqs.length} handle(s)`, true);
+            $('bulkJson').value = '';
+            refreshPipeline();
+            loadHandles(currentPage);
+        } else {
+            showStageResult(data.error || JSON.stringify(data), false);
+        }
+    } catch (e) { showStageResult(`Invalid JSON: ${e.message}`, false); }
+}
+
+// ---------------------------------------------------------------------------
+// Selection & bulk actions
+// ---------------------------------------------------------------------------
+function toggleHandle(name, checked) {
+    selectAllMode = false;
+    if (checked) selectedHandles.add(name); else selectedHandles.delete(name);
+    const hdr = $('selectAllPage');
+    if (hdr) hdr.checked = pageHandleNames.length > 0 && pageHandleNames.every(n => selectedHandles.has(n));
+    updateBulkBar();
+}
+
+function togglePageSelection(checked) {
+    selectAllMode = false;
+    pageHandleNames.forEach(n => { if (checked) selectedHandles.add(n); else selectedHandles.delete(n); });
+    document.querySelectorAll('#handlesBody input[type=checkbox]').forEach(cb => cb.checked = checked);
+
+    const banner = $('selectAllBanner');
+    if (checked && lastTotal > pageHandleNames.length) {
+        $('bannerPageCount').textContent = pageHandleNames.length;
+        $('bannerTotalCount').textContent = lastTotal;
+        banner.classList.remove('hidden');
+    } else {
+        banner.classList.add('hidden');
+    }
+    updateBulkBar();
+}
+
+function selectAllMatching() {
+    selectAllMode = true;
+    document.querySelectorAll('#handlesBody input[type=checkbox]').forEach(cb => cb.checked = true);
+    $('selectAllBanner').classList.add('hidden');
+    updateBulkBar();
+}
+
+function clearSelection() {
+    selectAllMode = false;
+    selectedHandles.clear();
+    document.querySelectorAll('#handlesBody input[type=checkbox]').forEach(cb => cb.checked = false);
+    const hdr = $('selectAllPage');
+    if (hdr) hdr.checked = false;
+    $('selectAllBanner').classList.add('hidden');
+    updateBulkBar();
+}
+
+function updateBulkBar() {
+    const n = selectAllMode ? lastTotal : selectedHandles.size;
+    const bar = $('bulkActionBar');
+    const btns = $('bulkButtons');
+    $('bulkCount').textContent = n;
+
+    if (n <= 0) { bar.classList.add('hidden'); return; }
+    bar.classList.remove('hidden');
+
+    let allStaged = true, allParked = true, noneParked = true;
+    let allPublished = true, nonePublished = true;
+
+    if (selectAllMode) {
+        const f = currentFilter;
+        allStaged     = !f || f === 'staged' || f === 'parked';
+        allParked     = f === 'parked';
+        noneParked    = f === 'staged' || f === 'unpublished' || f === 'committed';
+        allPublished  = f === 'published';
+        nonePublished = f === 'unpublished' || f === 'staged' || f === 'parked';
+    } else {
+        for (const name of selectedHandles) {
+            const m = handleMeta[name];
+            if (!m) continue;
+            if (!m.staged)    allStaged = false;
+            if (!m.parked)    allParked = false;
+            if (m.parked)     noneParked = false;
+            if (!m.published) allPublished = false;
+            if (m.published)  nonePublished = false;
+        }
+    }
+
+    const btn = (label, action) => `<button onclick="bulkAction('${action}')" class="btn-sm">${label}</button>`;
+    let h = '';
+    if (allStaged) {
+        if (noneParked)       h += btn('Park', 'park');
+        else if (allParked)   h += btn('Unpark', 'unpark');
+        else                  h += btn('Park', 'park') + btn('Unpark', 'unpark');
+        h += btn('Remove', 'remove');
+    }
+    h += btn(allPublished && !nonePublished ? 'Republish' : 'Publish', 'publish');
+    btns.innerHTML = h;
+}
+
+function getSelectionContext() {
+    const ctx = {};
+    if (selectAllMode) {
+        const s = $('handleSearch')?.value?.trim();
+        if (s) ctx.search = s;
+        if (currentFilter) ctx.filter = currentFilter;
+        ctx._count = lastTotal;
+    } else {
+        ctx.handles = [...selectedHandles];
+        ctx._count = ctx.handles.length;
+    }
+    return ctx;
+}
+
+async function bulkAction(action) {
+    if (action === 'remove') {
+        const count = selectAllMode ? lastTotal : selectedHandles.size;
+        if (!confirm(`Remove ${count} staged handle(s)? This cannot be undone.`)) return;
+    }
+
+    const ctx = getSelectionContext();
+    const n = ctx._count;
+    delete ctx._count;
+
+    const labels = { park: 'Parking', unpark: 'Unparking', publish: 'Publishing', remove: 'Removing' };
+    logAction(`${labels[action] || action} ${n} handle(s)...`);
+
+    try {
+        let url, body;
+        if (action === 'park' || action === 'unpark') {
+            url = `${spaceUrl}/park`;
+            body = { ...ctx, parked: action === 'park' };
+        } else if (action === 'remove') {
+            url = `${spaceUrl}/remove`;
+            body = { ...ctx };
+        } else {
+            url = `${spaceUrl}/publish`;
+            body = {};
+            if (!selectAllMode && ctx.handles) body.handles = ctx.handles;
+        }
+
+        const { ok, data } = await postJson(url, body);
+        if (ok) {
+            if (action === 'park' || action === 'unpark') logAction(`${action === 'park' ? 'Parked' : 'Unparked'} ${data.updated} handle(s)`);
+            else if (action === 'remove')                 logAction(`Removed ${data.removed} handle(s)`);
+            else                                          logAction(`Published ${data.handles_published} certificate(s)${data.remaining > 0 ? ' (' + data.remaining + ' remaining)' : ''}`);
+            clearSelection();
+            loadHandles(currentPage);
+            refreshPipeline();
+        } else {
+            logAction(`Error: ${data.error || JSON.stringify(data)}`);
+        }
+    } catch (e) { logAction(e.message); }
+}
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
 refreshPipeline();
 </script>
 {% endblock %}

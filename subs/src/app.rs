@@ -794,6 +794,17 @@ impl Operator {
         local_space.storage().set_parked(names, parked, search, filter).await
     }
 
+    pub async fn remove_staged(
+        &self,
+        space: &SLabel,
+        names: &[String],
+        search: Option<String>,
+        filter: Option<String>,
+    ) -> anyhow::Result<usize> {
+        let local_space = self.get_local_space(space)?;
+        local_space.storage().remove_staged_handles(names, search, filter).await
+    }
+
     // =========================================================================
     // Proving
     // =========================================================================

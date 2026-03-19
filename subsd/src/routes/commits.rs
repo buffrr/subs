@@ -297,6 +297,33 @@ pub async fn park_handles(
     Ok(Json(serde_json::json!({ "updated": count })))
 }
 
+#[derive(Deserialize)]
+pub struct RemoveBody {
+    #[serde(default)]
+    pub handles: Vec<String>,
+    pub search: Option<String>,
+    pub filter: Option<String>,
+}
+
+/// POST /spaces/:space/remove - Remove staged handles
+pub async fn remove_handles(
+    State(state): State<AppState>,
+    Path(space): Path<String>,
+    Json(body): Json<RemoveBody>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let space = space
+        .parse()
+        .map_err(|e| json_error(StatusCode::BAD_REQUEST, format!("invalid space: {}", e)))?;
+
+    let count = state
+        .operator
+        .remove_staged(&space, &body.handles, body.search, body.filter)
+        .await
+        .map_err(|e| json_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(Json(serde_json::json!({ "removed": count })))
+}
+
 /// GET /spaces/:space/pipeline - Get commitment pipeline status for stepper UI
 /// Extended pipeline status with prover config info for the UI
 #[derive(Serialize)]

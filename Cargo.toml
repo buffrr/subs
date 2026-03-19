@@ -10,13 +10,7 @@ subs-types = { path = "types" }
 subs-prover = { path = "prover" }
 spacedb = { git = "https://github.com/spacesprotocol/spacedb.git", version = "0.0.12" }
 relay = { path = "/Users/adams/RustroverProjects/itsparis/certrelay/relay" }
-fabric = { path = "/Users/adams/RustroverProjects/itsparis/certrelay/fabric" }
+fabric = { path = "/Users/adams/RustroverProjects/itsparis/certrelay/fabric/rust/" }
 
 
-# Always optimize; building and running the guest takes much longer without optimization.
-[profile.dev]
-opt-level = 3
 
-[profile.release]
-debug = 1
-lto = true

@@ -130,6 +130,7 @@ pub struct SpaceStatus {
     pub total_handles: usize,
     pub staged_handles: usize,
     pub committed_handles: usize,
+    pub parked_handles: usize,
     pub pending_proofs: usize,
     pub has_receipt: bool,
     pub has_groth16: bool,
@@ -254,14 +255,16 @@ impl LocalSpace {
     pub async fn status(&self) -> anyhow::Result<SpaceStatus> {
         let staged = self.storage.staged_count().await?;
         let committed = self.storage.committed_handle_count().await?;
+        let parked = self.storage.parked_count().await?;
         let commitments = self.storage.list_commitments().await?;
         let pending_proofs = count_pending_proofs(&commitments);
         Ok(SpaceStatus {
             space: self.name.clone(),
             commitments: commitments.len(),
-            total_handles: staged + committed,
+            total_handles: staged + committed + parked,
             staged_handles: staged,
             committed_handles: committed,
+            parked_handles: parked,
             pending_proofs,
             has_receipt: self.storage.get_tip_receipt_id().await?.is_some(),
             has_groth16: self.storage.get_tip_groth16_id().await?.is_some(),
