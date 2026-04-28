@@ -1,46 +1,44 @@
 [package]
 name = "subs"
-version = "0.1.2"
+version = "0.1.0"
 edition = "2021"
+description = "HTTP REST API server for subs operations"
+default-run = "subs"
 
 [[bin]]
-name = "spaced"
-path = "tests/bin/spaced.rs"
-
-[lib]
-path = "src/lib.rs"
+name = "subs"
+path = "src/main.rs"
 
 [dependencies]
-risc0-zkvm = { version = "3.0.5", features = ["std"] }
-serde = "1.0"
-bitcoin = { version = "0.32.2", features = ["base64", "serde", "rand-std"] }
-spacedb = { workspace = true }
-
-spaces_protocol = { version = "0.1", features = ["std"] }
-spaces_nums = { version = "0.1", features = ["std"] }
-spaces_client = { version = "0.1", features = ["schema"] }
-spaces_wallet = "0.1"
-fabric = { workspace = true }
-
-libveritas = { workspace = true }
-libveritas_zk = { workspace = true }
+subs-core = { workspace = true }
 subs-types = { workspace = true }
 
-serde_json = "1.0.140"
-anyhow = "1.0.97"
-hex = "0.4.3"
-borsh = { version = "1.5", default-features = false, features = ["derive"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-env_logger = "0.11.8"
-log = "0.4.29"
+axum = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+tower-http = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+base64 = "0.22"
+reqwest = { workspace = true, features = ["rustls-tls"] }
+hex = { workspace = true }
+askama = "0.12"
+askama_axum = "0.4"
+spaces_client = { workspace = true }
+spaces_protocol = { workspace = true }
+spaces_wallet = { workspace = true, optional = true }
+spaces_testutil = { workspace = true, optional = true }
+bitcoin = { workspace = true }
+borsh = { workspace = true }
+rusqlite = { workspace = true }
+
+
+relay = { workspace = true, optional = true }
 
 [features]
 default = []
-
-
-[dev-dependencies]
-tempfile = "3"
-spaces_testutil = { git = "https://github.com/spacesprotocol/spaces.git", branch = "subspaces" }
-subs-prover = { workspace = true }
-
+test-rig = ["dep:spaces_testutil", "dep:spaces_wallet", "dep:relay"]

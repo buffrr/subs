@@ -7,7 +7,7 @@ use axum::{
     response::Response,
 };
 use serde::{Deserialize, Serialize};
-use subs::{PipelineStatus, SpaceCommitResult};
+use subs_core::{PipelineStatus, SpaceCommitResult};
 
 use crate::state::AppState;
 use super::json_error;
@@ -146,7 +146,7 @@ pub async fn get_commit_status(
     State(state): State<AppState>,
     Path(space): Path<String>,
 ) -> Result<Json<CommitStatusResponse>, Response> {
-    use subs::app::CommitStatus;
+    use subs_core::app::CommitStatus;
 
     let space = space
         .parse()

@@ -5,6 +5,6 @@ edition = "2021"
 description = "Shared types for subs and subs-prover"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-borsh = { version = "1.6", features = ["derive"] }
+serde = { workspace = true }
+borsh = { workspace = true }
 libveritas_zk = { workspace = true }

@@ -12,7 +12,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use subs::CompressInput;
+use subs_core::CompressInput;
 
 use crate::state::AppState;
 use super::json_error;
@@ -257,10 +257,10 @@ pub async fn push_to_prover(
 
     // Store the job info (space:commitment_id:is_fold -> job_id)
     let commitment_id = match &request {
-        subs::ProvingRequest::Step { commitment_id, .. } => commitment_id,
-        subs::ProvingRequest::Fold { commitment_id, .. } => commitment_id,
+        subs_core::ProvingRequest::Step { commitment_id, .. } => commitment_id,
+        subs_core::ProvingRequest::Fold { commitment_id, .. } => commitment_id,
     };
-    let is_fold = matches!(&request, subs::ProvingRequest::Fold { .. });
+    let is_fold = matches!(&request, subs_core::ProvingRequest::Fold { .. });
 
     let job_key = format!("job:{}:{}:{}", space, commitment_id, if is_fold { "fold" } else { "step" });
     state
@@ -321,10 +321,10 @@ pub async fn poll_prover(
     };
 
     let commitment_id = match &request {
-        subs::ProvingRequest::Step { commitment_id, .. } => *commitment_id,
-        subs::ProvingRequest::Fold { commitment_id, .. } => *commitment_id,
+        subs_core::ProvingRequest::Step { commitment_id, .. } => *commitment_id,
+        subs_core::ProvingRequest::Fold { commitment_id, .. } => *commitment_id,
     };
-    let is_fold = matches!(&request, subs::ProvingRequest::Fold { .. });
+    let is_fold = matches!(&request, subs_core::ProvingRequest::Fold { .. });
 
     // Look up the job_id
     let job_key = format!("job:{}:{}:{}", space, commitment_id, if is_fold { "fold" } else { "step" });

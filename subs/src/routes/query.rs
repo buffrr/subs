@@ -20,7 +20,7 @@ pub struct QueryBody {
 pub async fn resolve_handle(
     State(state): State<AppState>,
     Json(body): Json<QueryBody>,
-) -> Result<Json<Vec<subs::app::ResolvedZone>>, Response> {
+) -> Result<Json<Vec<subs_core::app::ResolvedZone>>, Response> {
     let handles: Vec<&str> = body.handle.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
     if handles.is_empty() {
         return Err(json_error(StatusCode::BAD_REQUEST, anyhow::anyhow!("no handles provided")));

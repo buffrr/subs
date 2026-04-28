@@ -1549,7 +1549,7 @@ impl Operator {
             log::info!("[{}] Reset {} stale temp cert(s) for republishing", space, reset);
         }
 
-        let mut all_handles = storage.select_handles(
+        let all_handles = storage.select_handles(
             if only.is_empty() {
                 crate::storage::HandleSelector::Unpublished(confirmed_idx)
             } else {

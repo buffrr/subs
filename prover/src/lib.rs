@@ -12,7 +12,6 @@ use libveritas_zk::guest::Commitment;
 use risc0_zkvm::{default_executor, default_prover, ExecutorEnv, ProverOpts, Receipt};
 use spacedb::{NodeHasher, Sha256Hasher};
 use spacedb::subtree::{ProofType, SubTree, ValueOrHash};
-use tracing::log;
 use subs_types::{CalibrationInfo, CompressInput, EstimateResult, ProvingRequest, SegmentEstimate};
 
 /// Build a synthetic ProvingRequest::Step for benchmarking/calibration.

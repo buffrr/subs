@@ -5,7 +5,7 @@
 
 use spaces_protocol::sname::SName;
 use spaces_protocol::slabel::SLabel;
-use subs::{HandleRequest, Operator};
+use subs_core::{HandleRequest, Operator};
 use tempfile::TempDir;
 
 fn make_request(handle: &str, spk: &[u8]) -> HandleRequest {
@@ -107,7 +107,7 @@ async fn test_duplicate_detection() {
     assert_eq!(result.by_space[0].skipped.len(), 1);
     assert!(matches!(
         result.by_space[0].skipped[0].reason,
-        subs::SkipReason::AlreadyCommitted
+        subs_core::SkipReason::AlreadyCommitted
     ));
 
     // Try to add alice with different spk - should be skipped
@@ -116,7 +116,7 @@ async fn test_duplicate_detection() {
     assert_eq!(result.total_added, 0);
     assert!(matches!(
         result.by_space[0].skipped[0].reason,
-        subs::SkipReason::AlreadyCommittedDifferentSpk
+        subs_core::SkipReason::AlreadyCommittedDifferentSpk
     ));
 }
 

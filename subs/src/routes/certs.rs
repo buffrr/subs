@@ -8,7 +8,7 @@ use axum::{
 };
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use subs::{Certificate, VerifyCertResult};
+use subs_core::{Certificate, VerifyCertResult};
 
 use crate::state::AppState;
 use super::json_error;

@@ -12,24 +12,24 @@ name = "subs-prover"
 path = "src/main.rs"
 
 [dependencies]
-risc0-zkvm = { version = "3.0.5", features = ["std", "prove"] }
+risc0-zkvm = { workspace = true, features = ["prove"] }
 libveritas = { workspace = true }
 libveritas_zk = { workspace = true }
 subs-types = { workspace = true }
-spacedb = {workspace = true}
+spacedb = { workspace = true }
 
-clap = { version = "4.5", features = ["derive"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-anyhow = "1.0"
-borsh = { version = "1.6", features = ["derive"] }
-reqwest = { version = "0.12", features = ["json"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "signal"] }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+borsh = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync", "signal"] }
 urlencoding = "2.1"
-axum = "0.7"
-tower-http = { version = "0.5", features = ["cors", "trace"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+axum = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 uuid = { version = "1.0", features = ["v4"] }
 
 [features]

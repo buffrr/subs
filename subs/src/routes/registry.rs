@@ -111,7 +111,7 @@ pub async fn sync_from_registry(State(state): State<AppState>) -> Result<Json<Sy
             }
         };
 
-        requests.push(subs::HandleRequest {
+        requests.push(subs_core::HandleRequest {
             handle: handle_name,
             script_pubkey: handle.script_pubkey.clone(),
             dev_private_key: None,

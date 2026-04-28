@@ -21,6 +21,7 @@ pub struct RpcRequest {
 #[derive(Debug, Deserialize)]
 pub struct MineRequest {
     #[serde(default = "default_mine_count")]
+    #[cfg_attr(not(feature = "test-rig"), allow(dead_code))]
     pub count: u32,
 }
 

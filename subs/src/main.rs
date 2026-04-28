@@ -25,7 +25,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use subs::Operator;
+use subs_core::Operator;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};

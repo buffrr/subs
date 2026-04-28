@@ -7,7 +7,7 @@ use axum::{
 };
 use spaces_client::rpc::RpcClient;
 use spaces_client::wallets::AddressKind;
-use subs::SpaceStatus;
+use subs_core::SpaceStatus;
 
 use crate::state::AppState;
 

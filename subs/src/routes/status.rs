@@ -7,7 +7,7 @@ use axum::{
     response::Response,
 };
 use serde::{Deserialize, Serialize};
-use subs::{HandlesListResult, SpaceStatus, StatusResult};
+use subs_core::{HandlesListResult, SpaceStatus, StatusResult};
 
 use crate::state::AppState;
 use super::json_error;
@@ -122,7 +122,7 @@ fn default_per_page() -> usize { 20 }
 pub async fn get_handle(
     State(state): State<AppState>,
     Path((space, handle)): Path<(String, String)>,
-) -> Result<Json<subs::HandleInfo>, Response> {
+) -> Result<Json<subs_core::HandleInfo>, Response> {
     let space = space
         .parse()
         .map_err(|e| json_error(StatusCode::BAD_REQUEST, format!("invalid space: {}", e)))?;

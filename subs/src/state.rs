@@ -1,7 +1,7 @@
 //! Application state for the subsd server.
 
 use std::sync::Arc;
-use subs::Operator;
+use subs_core::Operator;
 
 use crate::config::ConfigStore;
 

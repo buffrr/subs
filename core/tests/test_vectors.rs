@@ -25,7 +25,7 @@ use spaces_protocol::sname::SName;
 use spaces_testutil::TestRig;
 use spaces_wallet::Subject;
 use spaces_wallet::export::WalletExport;
-use subs::{HandleRequest, Operator};
+use subs_core::{HandleRequest, Operator};
 use tempfile::TempDir;
 
 const ALICE: &str = "wallet_99";

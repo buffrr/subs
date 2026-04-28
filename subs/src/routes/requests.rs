@@ -7,7 +7,7 @@ use axum::{
     response::Response,
 };
 use serde::{Deserialize, Serialize};
-use subs::{AddResult, HandleRequest};
+use subs_core::{AddResult, HandleRequest};
 
 use crate::state::AppState;
 use super::json_error;

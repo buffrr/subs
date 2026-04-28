@@ -73,16 +73,6 @@ impl ConfigStore {
         Ok(())
     }
 
-    /// Get all configuration values.
-    pub fn get_all(&self) -> Result<Vec<(String, String)>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT key, value FROM config ORDER BY key")?;
-        let rows = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
-    }
-
     /// Get the prover endpoint URL.
     pub fn prover_endpoint(&self) -> Result<Option<String>> {
         self.get(KEY_PROVER_ENDPOINT)
