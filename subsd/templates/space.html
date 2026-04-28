@@ -13,6 +13,35 @@
 {% block content %}
 <div class="anim" style="display:flex;flex-direction:column;gap:16px">
 
+    {% match space.health_warning %}
+    {% when Some with (w) %}
+    <div class="alert alert-warning anim" style="animation-delay:.02s">
+        <div class="flex items-center gap-2" style="font-weight:600;margin-bottom:8px">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+            </svg>
+            Untracked On-Chain Commitment
+        </div>
+        <p style="margin:0 0 10px;font-size:13px;line-height:1.5">{{ w.message }}</p>
+        <div style="display:flex;flex-direction:column;gap:6px;font-family:var(--mono);font-size:12px">
+            <div class="hash-row">
+                <span class="hash-label" style="width:auto;min-width:90px">Commitment Root</span>
+                <span class="hash-value break-all" style="white-space:normal; background:#1b1813;">{{ w.chain_root }}</span>
+                <button class="hash-copy" onclick="copyToClipboard('{{ w.chain_root }}',this)">copy</button>
+            </div>
+            <div style="color:var(--text-muted)">Block Height: <strong style="color:var(--text-primary)">#{{ w.block_height }}</strong></div>
+            {% if w.can_rollback %}
+            <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
+                <button onclick="rollbackCommitment()" class="btn-primary" style="font-size:12px;padding:6px 14px">Rollback Commitment</button>
+                <span style="font-size:11px;color:var(--text-muted)">{{ w.blocks_until_finalized }} blocks until finalized</span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% when None %}
+    {% endmatch %}
+
+    <div style="display:flex;flex-direction:column;gap:16px" {% match space.health_warning %}{% when Some with (_w) %}class="space-disabled"{% when None %}{% endmatch %}>
     <!-- Summary Bar -->
     <div class="summary-bar anim" style="animation-delay:.04s">
         <div class="summary-stats">
@@ -69,11 +98,14 @@
                 <h3>Handles</h3>
                 <div id="handlesPagination" class="flex items-center gap-2" style="font-size:11px"></div>
             </div>
-            <button onclick="toggleStageForm()" id="stageToggleBtn" class="add-btn">+ Add</button>
+            <div class="flex items-center gap-2">
+                <button onclick="showAddMode('single')" id="addSingleBtn" class="add-btn">+ Add</button>
+                <button onclick="showAddMode('bulk')" id="addBulkBtn" class="btn-sm">Bulk Import</button>
+            </div>
         </div>
 
-        <!-- Stage Form -->
-        <div id="stageForm" class="stage-form hidden">
+        <!-- Single Add Form -->
+        <div id="singleAddForm" class="stage-form hidden">
             <form id="addHandleForm" class="stage-form-inner">
                 <div class="flex items-end gap-3">
                     <div class="flex-1">
@@ -92,17 +124,33 @@
                     </button>
                     <button type="submit" class="btn-primary">Stage</button>
                 </div>
-                <div style="margin-top:10px">
-                    <button type="button" onclick="toggleBulkForm()" style="font-family:var(--mono);font-size:11px;color:var(--text-muted);background:none;border:none;cursor:pointer">Bulk add...</button>
-                </div>
-                <div id="bulkForm" class="hidden" style="margin-top:10px">
-                    <div id="bulkAddForm">
-                        <textarea id="bulkJson" rows="3" placeholder='[{"handle": "alice{{ space.space }}", "script_pubkey": "5120..."}]' class="input-field w-full font-mono" style="margin-bottom:10px"></textarea>
-                        <button type="button" onclick="submitBulk()" class="btn-primary">Stage All</button>
-                    </div>
-                </div>
             </form>
             <div id="stageResult" class="hidden" style="margin-top:10px"></div>
+        </div>
+
+        <!-- Bulk Import Form -->
+        <div id="bulkImportForm" class="stage-form hidden">
+            <div class="stage-form-inner">
+                <div id="bulkDropZone" class="bulk-drop-zone">
+                    <input type="file" id="bulkFileInput" accept=".json" style="display:none" onchange="handleBulkFile(this.files[0])">
+                    <div class="bulk-drop-content">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <span style="font-size:13px;color:var(--text-secondary)">Drop a JSON file or <button type="button" onclick="$('bulkFileInput').click()" style="color:var(--accent);background:none;border:none;cursor:pointer;font-size:13px;font-family:var(--sans);text-decoration:underline">browse</button></span>
+                        <span style="font-size:11px;color:var(--text-muted);font-family:var(--mono)">[{"handle": "alice{{ space.space }}", "script_pubkey": "5120..."}]</span>
+                    </div>
+                </div>
+                <div id="bulkPreview" class="hidden" style="margin-top:12px">
+                    <div class="flex items-center justify-between" style="margin-bottom:8px">
+                        <span id="bulkPreviewCount" style="font-size:13px;color:var(--text-secondary)"></span>
+                        <div class="flex items-center gap-2">
+                            <button type="button" onclick="clearBulkFile()" class="btn-sm">Clear</button>
+                            <button type="button" onclick="submitBulkFile()" class="btn-primary">Stage All</button>
+                        </div>
+                    </div>
+                    <pre id="bulkPreviewContent" class="code-block" style="max-height:160px;overflow:auto;font-size:11px"></pre>
+                </div>
+                <div id="bulkResult" class="hidden" style="margin-top:10px"></div>
+            </div>
         </div>
 
         <!-- Filter Bar -->
@@ -162,6 +210,7 @@
             </div>
         </div>
     </div>
+    </div><!-- /space-disabled wrapper -->
 </div>
 {% endblock %}
 
@@ -423,23 +472,42 @@ async function commitLocal() {
 }
 
 async function broadcast() {
-    let fees = null;
-    try { const r = await fetch('/fees'); if (r.ok) fees = await r.json(); } catch (_) {}
+    openFeeModal(null, async (feeRate) => {
+        logAction(`Broadcasting${feeRate ? ' at ' + feeRate + ' sat/vB' : ''}...`);
+        try {
+            const { ok, data } = await postJson(`${spaceUrl}/broadcast`, feeRate ? { fee_rate: feeRate } : {});
+            if (ok) { logAction(`TX: ${data.txid}`); refreshPipeline(); }
+            else logAction(`Error: ${data.error || JSON.stringify(data)}`);
+        } catch (e) { logAction(e.message); }
+    });
+}
 
-    let prompt_text = 'Fee rate (sat/vB):\n\n';
-    if (fees) prompt_text += `Fastest: ${fees.fastestFee} | Half hour: ${fees.halfHourFee} | Hour: ${fees.hourFee} | Economy: ${fees.economyFee}\n\n`;
-    prompt_text += 'Empty for wallet estimate:';
-
-    const input = prompt(prompt_text);
-    if (input === null) return;
-    const feeRate = input.trim() === '' ? null : parseFloat(input);
-
-    logAction(`Broadcasting${feeRate ? ' at ' + feeRate + ' sat/vB' : ''}...`);
-    try {
-        const { ok, data } = await postJson(`${spaceUrl}/broadcast`, feeRate ? { fee_rate: feeRate } : {});
-        if (ok) { logAction(`TX: ${data.txid}`); refreshPipeline(); }
-        else logAction(`Error: ${data.error || JSON.stringify(data)}`);
-    } catch (e) { logAction(e.message); }
+async function rollbackCommitment() {
+    openFeeModal(null, async (feeRate) => {
+        const params = [walletName, {
+            requests: [{ request: 'commit', subject: space, root: null }],
+            fee_rate: toRpcFeeRate(feeRate),
+            force: false,
+            confirmed_only: false,
+            skip_tx_check: false,
+        }];
+        try {
+            const r = await fetch('/rpc/spaced', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ method: 'walletsendrequest', params })
+            });
+            const data = await r.json();
+            if (data.result) {
+                alert('Rollback transaction submitted. Reload the page after confirmation.');
+                location.reload();
+            } else {
+                alert('Rollback failed: ' + JSON.stringify(data.error || data));
+            }
+        } catch (e) {
+            alert('Rollback failed: ' + e.message);
+        }
+    });
 }
 
 async function startProving() {
@@ -587,14 +655,39 @@ function renderPagination(r) {
 }
 
 // ---------------------------------------------------------------------------
-// Stage form
+// Add forms
 // ---------------------------------------------------------------------------
-function toggleStageForm()   { $('stageForm').classList.toggle('hidden'); }
+let currentAddMode = null;
+let bulkFileData = null;
+
+function showAddMode(mode) {
+    const single = $('singleAddForm');
+    const bulk = $('bulkImportForm');
+
+    if (currentAddMode === mode) {
+        single.classList.add('hidden');
+        bulk.classList.add('hidden');
+        currentAddMode = null;
+        return;
+    }
+
+    currentAddMode = mode;
+    single.classList.toggle('hidden', mode !== 'single');
+    bulk.classList.toggle('hidden', mode !== 'bulk');
+}
+
 function toggleScriptPubkey() { $('scriptPubkeyField').classList.toggle('hidden'); }
-function toggleBulkForm()    { $('bulkForm').classList.toggle('hidden'); }
 
 function showStageResult(msg, ok) {
     const el = $('stageResult');
+    el.className = `alert ${ok ? 'alert-success' : 'alert-error'}`;
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    if (ok) setTimeout(() => el.classList.add('hidden'), 3000);
+}
+
+function showBulkResult(msg, ok) {
+    const el = $('bulkResult');
     el.className = `alert ${ok ? 'alert-success' : 'alert-error'}`;
     el.textContent = msg;
     el.classList.remove('hidden');
@@ -630,20 +723,61 @@ $('addHandleForm').addEventListener('submit', async e => {
     } catch (e) { showStageResult(e.message, false); }
 });
 
-async function submitBulk() {
+// ---------------------------------------------------------------------------
+// Bulk import (file upload)
+// ---------------------------------------------------------------------------
+function handleBulkFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const parsed = JSON.parse(e.target.result);
+            const reqs = Array.isArray(parsed) ? parsed : (parsed.requests || [parsed]);
+            if (!reqs.length) { showBulkResult('No requests found in file', false); return; }
+            bulkFileData = reqs;
+            $('bulkPreviewCount').textContent = `${reqs.length} handle${reqs.length > 1 ? 's' : ''} from ${esc(file.name)}`;
+            const preview = reqs.slice(0, 5).map(r => r.handle || '?');
+            let txt = preview.join('\n');
+            if (reqs.length > 5) txt += `\n... and ${reqs.length - 5} more`;
+            $('bulkPreviewContent').textContent = txt;
+            $('bulkPreview').classList.remove('hidden');
+            $('bulkDropZone').classList.add('hidden');
+        } catch (err) {
+            showBulkResult(`Invalid JSON: ${err.message}`, false);
+        }
+    };
+    reader.readAsText(file);
+}
+
+function clearBulkFile() {
+    bulkFileData = null;
+    $('bulkFileInput').value = '';
+    $('bulkPreview').classList.add('hidden');
+    $('bulkDropZone').classList.remove('hidden');
+}
+
+async function submitBulkFile() {
+    if (!bulkFileData || !bulkFileData.length) return;
     try {
-        const reqs = JSON.parse($('bulkJson').value);
-        const { ok, data } = await postJson('/requests', { requests: reqs });
+        const { ok, data } = await postJson('/requests', { requests: bulkFileData });
         if (ok) {
-            showStageResult(`Staged ${reqs.length} handle(s)`, true);
-            $('bulkJson').value = '';
+            showBulkResult(`Staged ${data.total_added} handle(s)`, true);
+            clearBulkFile();
             refreshPipeline();
             loadHandles(currentPage);
         } else {
-            showStageResult(data.error || JSON.stringify(data), false);
+            showBulkResult(data.error || JSON.stringify(data), false);
         }
-    } catch (e) { showStageResult(`Invalid JSON: ${e.message}`, false); }
+    } catch (e) { showBulkResult(e.message, false); }
 }
+
+// Drag-and-drop
+(function() {
+    const zone = $('bulkDropZone');
+    ['dragenter','dragover'].forEach(ev => zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.add('drag-over'); }));
+    ['dragleave','drop'].forEach(ev => zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.remove('drag-over'); }));
+    zone.addEventListener('drop', e => { if (e.dataTransfer.files.length) handleBulkFile(e.dataTransfer.files[0]); });
+})();
 
 // ---------------------------------------------------------------------------
 // Selection & bulk actions

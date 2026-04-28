@@ -8,11 +8,11 @@ use spaces_protocol::bitcoin::ScriptBuf;
 use spaces_protocol::slabel::SLabel;
 use spacedb::Sha256Hasher as sha256;
 use libveritas::cert::HandleOut;
-use libveritas::sname::{Label, SName};
+use libveritas::spaces_protocol::sname::{Subname, SName};
 pub extern crate spaces_protocol;
 
 // Re-export key types for library users
-pub use crate::app::{Operator, HandleInfo, HandlesListResult, PipelineStatus, PipelineSteps, StepState};
+pub use crate::app::{Operator, HandleInfo, HandlesListResult, PipelineStatus, PipelineSteps, ResolvedZone, StepState};
 pub use crate::core::{
     AddResult, SpaceAddResult, SkippedEntry, SkipReason,
     SpaceCommitResult, StatusResult, SpaceStatus,
@@ -32,6 +32,9 @@ pub use spaces_nums::RootAnchor;
 pub struct HandleRequest {
     pub handle: SName,
     pub script_pubkey: String,
+    /// Testing only: auto-generated WIF key
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub dev_private_key: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -42,7 +45,7 @@ pub struct Batch {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BatchEntry {
-    pub sub_label: Label,
+    pub sub_label: Subname,
     pub script_pubkey: ScriptBuf,
 }
 
@@ -60,10 +63,7 @@ impl Batch {
 
     pub fn to_zk_input(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
-
-        let space_hash = sha256::hash(self.space.as_ref());
-        bytes.extend_from_slice(&space_hash);
-
+        
         for entry in &self.entries {
             let subspace_hash = sha256::hash(entry.sub_label.as_slabel().as_ref());
             bytes.extend_from_slice(&subspace_hash);

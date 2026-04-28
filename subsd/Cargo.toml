@@ -9,10 +9,6 @@ default-run = "subsd"
 name = "subsd"
 path = "src/main.rs"
 
-[[bin]]
-name = "spaced"
-path = "src/bin/spaced.rs"
-
 [dependencies]
 subs = { path = "../subs" }
 subs-types = { workspace = true }
@@ -33,9 +29,9 @@ hex = "0.4"
 askama = "0.12"
 askama_axum = "0.4"
 
-spaces_client = { git = "https://github.com/spacesprotocol/spaces.git", branch = "subspaces" }
-spaces_protocol = { git = "https://github.com/spacesprotocol/spaces.git", branch = "subspaces", features = ["std"] }
-spaces_wallet = { git = "https://github.com/spacesprotocol/spaces.git", branch = "subspaces", optional = true }
+spaces_client = "0.1"
+spaces_protocol = { version = "0.1", features = ["std"] }
+spaces_wallet = { version = "0.1", optional = true }
 spaces_testutil = { git = "https://github.com/spacesprotocol/spaces.git", branch = "subspaces", optional = true }
 libveritas = { workspace = true }
 bitcoin = { version = "0.32.2", features = ["rand-std"] }

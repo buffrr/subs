@@ -27,9 +27,9 @@ pub fn router() -> Router<AppState> {
         // Web UI
         .route("/", get(web::dashboard))
         .route("/ui/operate", get(web::operate_page))
-        .route("/ui/requests", get(web::requests_page))
         .route("/ui/query", get(web::query_page))
         .route("/ui/settings", get(web::settings_page))
+        .route("/ui/transactions", get(web::transactions_page))
         .route("/ui/spaces/:space", get(web::space_page))
         .route("/ui/spaces/:space/handles/:handle", get(web::handle_page))
         // API: Status & Spaces
@@ -63,6 +63,8 @@ pub fn router() -> Router<AppState> {
         .route("/spaces/:space/snark", post(proving::save_snark))
         // API: Query
         .route("/query", post(query::resolve_handle))
+        .route("/query/message", get(query::export_message))
+        .route("/query/anchors", get(query::export_anchors))
         // API: Certificates
         .route("/certs/:handle", get(certs::issue_cert))
         .route("/certs/verify", post(certs::verify_cert))

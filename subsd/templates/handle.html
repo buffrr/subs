@@ -127,7 +127,18 @@ function renderInfo(h) {
                        </div>`
                     : '<div class="detail-value" style="color:var(--text-muted)">-</div>'}
             </div>
-        </div>`;
+        </div>
+        ${h.dev_private_key ? `
+        <div style="margin-top:16px;padding:12px 14px;background:var(--yellow-dim);border:1px solid rgba(212,169,78,0.16);border-radius:8px">
+            <div class="flex items-center gap-2" style="margin-bottom:8px">
+                <span style="font-family:var(--mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--yellow)">Dev Private Key</span>
+                <span style="font-family:var(--mono);font-size:9px;color:var(--text-muted)">(testing only — not for production)</span>
+            </div>
+            <div class="hash-row">
+                <span class="hash-value break-all" style="white-space:normal;font-size:11px">${esc(h.dev_private_key)}</span>
+                <button class="hash-copy" onclick="copyToClipboard('${esc(h.dev_private_key)}',this)">copy</button>
+            </div>
+        </div>` : ''}`;
 }
 
 function renderActions(h) {

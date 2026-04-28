@@ -103,7 +103,7 @@ pub async fn sync_from_registry(State(state): State<AppState>) -> Result<Json<Sy
 
     for handle in &pending.handles {
         // Parse the handle name
-        let handle_name: libveritas::sname::SName = match handle.handle.parse() {
+        let handle_name: spaces_protocol::sname::SName = match handle.handle.parse() {
             Ok(h) => h,
             Err(e) => {
                 errors.push(format!("{}: invalid handle: {}", handle.handle, e));
@@ -114,6 +114,7 @@ pub async fn sync_from_registry(State(state): State<AppState>) -> Result<Json<Sy
         requests.push(subs::HandleRequest {
             handle: handle_name,
             script_pubkey: handle.script_pubkey.clone(),
+            dev_private_key: None,
         });
         staged_handles.push(handle.handle.clone());
     }

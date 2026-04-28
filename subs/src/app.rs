@@ -7,17 +7,19 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::core::{
-    CompressInput, LocalSpace, ProvingRequest, SkippedEntry, SpaceStatus, VerifyCertResult,
+    CompressInput, HealthWarning, LocalSpace, ProvingRequest, SkippedEntry, SpaceStatus, VerifyCertResult,
 };
 use crate::HandleRequest;
 use anyhow::anyhow;
 use bitcoin::hashes::{sha256, Hash as BitcoinHash};
 use bitcoin::{FeeRate, ScriptBuf, Txid};
-use fabric::client::Fabric;
-use libveritas::cert::{Certificate, ChainProofRequestUtils, NumsSubtree, SpacesSubtree, Witness};
+use fabric::anchor::AnchorSets;
+use fabric::client::{Fabric, Badge};
+use libveritas::cert::{Certificate, CertificateChain, ChainProofRequestUtils, NumsSubtree, SpacesSubtree, Witness};
 use libveritas::msg::{ChainProof, Message};
-use libveritas::sname::{NameLike, SName};
 use libveritas::{ProvableOption, SovereigntyState, Zone};
+use libveritas::builder::MessageBuilder;
+use libveritas::sip7::RecordSet;
 use spacedb::subtree::SubTree;
 use spacedb::{NodeHasher, Sha256Hasher};
 use spaces_client::jsonrpsee::http_client::HttpClient;
@@ -27,6 +29,7 @@ use spaces_protocol::{Bytes, FullSpaceOut};
 use spaces_nums::num_id::NumId;
 use spaces_nums::FullNumOut;
 use spaces_nums::{ChainProofRequest, RootAnchor};
+use spaces_protocol::sname::{SName, NameLike};
 
 pub struct Sha256;
 
@@ -76,6 +79,20 @@ pub enum CommitStatus {
     Finalized { block_height: u32 },
 }
 
+/// A resolved zone with its verification badge.
+#[derive(Clone, serde::Serialize)]
+pub struct ResolvedZone {
+    #[serde(flatten)]
+    pub zone: Zone,
+    pub badge: String,
+}
+
+/// Exported verification bundle containing the binary message and root anchors.
+pub struct VerificationBundle {
+    pub message: Vec<u8>,
+    pub anchors: Vec<RootAnchor>,
+}
+
 /// Handle information for API responses
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct HandleInfo {
@@ -86,6 +103,9 @@ pub struct HandleInfo {
     pub commitment_idx: Option<usize>,
     pub publish_status: Option<String>,
     pub parked: bool,
+    /// Testing only: auto-generated WIF key (not for production use)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dev_private_key: Option<String>,
 }
 
 /// Paginated list of handles
@@ -151,13 +171,13 @@ impl LiveSpaceInfo {
         if label_count == 1 {
             let Some(tip) = tip else {
                 return Ok(Certificate::new(
-                    SName::from_space(&self.space).unwrap(),
+                    SName::from_space(&self.space),
                     Witness::Root { receipt: None },
                 ));
             };
             return Ok(self
                 .local
-                .issue_cert(&SName::from_space(&self.space).unwrap(), tip)
+                .issue_cert(&SName::from_space(&self.space), tip)
                 .await?);
         }
         if label_count != 2 {
@@ -177,11 +197,13 @@ impl LiveSpaceInfo {
         let zone = Zone {
             anchor: 0,
             sovereignty: SovereigntyState::Dependent,
+            canonical: name.clone(),
             handle: name.clone(),
             alias: None,
+            num_id: Some(NumId::from_spk::<Sha256>(script_pubkey.clone())),
             script_pubkey,
-            records: None,
-            fallback_records: None,
+            records: RecordSet::empty(),
+            fallback_records: RecordSet::empty(),
             delegate: ProvableOption::Unknown,
             commitment: ProvableOption::Unknown,
         };
@@ -227,6 +249,7 @@ pub struct Operator {
     wallet: String,
     rpc: Option<HttpClient>,
     fabric: Option<Fabric>,
+    fabric_seeds: Vec<String>,
     spaces: Arc<Mutex<HashMap<SLabel, Arc<LocalSpace>>>>,
 }
 
@@ -244,6 +267,7 @@ impl Operator {
             rpc: Some(rpc),
             spaces: Arc::new(Mutex::new(HashMap::new())),
             fabric: None,
+            fabric_seeds: Vec::new(),
         }
     }
 
@@ -256,6 +280,7 @@ impl Operator {
             wallet: String::new(),
             rpc: None,
             fabric: None,
+            fabric_seeds: Vec::new(),
             spaces: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -263,12 +288,15 @@ impl Operator {
     /// Set the fabric client with default seeds.
     pub fn with_fabric(mut self) -> Self {
         self.fabric = Some(Fabric::new());
+        // empty means default seeds
+        self.fabric_seeds = Vec::new();
         self
     }
 
     /// Set the fabric client with custom bootstrap seed URLs.
     pub fn with_fabric_seeds(mut self, seeds: &[&str]) -> Self {
         self.fabric = Some(Fabric::with_seeds(seeds));
+        self.fabric_seeds = seeds.iter().map(|s| s.to_string()).collect();
         self
     }
 
@@ -296,32 +324,75 @@ impl Operator {
             .ok_or_else(|| anyhow!("Fabric client required for this operation"))
     }
 
+    /// Export a verifiable message for a handle: the binary message (.spacemsg)
+    /// and the root anchors needed to verify it.
+    /// Uses a fresh Fabric instance to avoid cached data missing proof receipts.
+    pub async fn export_message(&self, handle: &str) -> anyhow::Result<VerificationBundle> {
+        self.require_fabric()?;
+        let rpc = self.require_rpc()?;
+
+        // Create a fresh fabric instance to avoid stale cache
+        let fabric = if self.fabric_seeds.is_empty() {
+            Fabric::new()
+        } else {
+            let refs: Vec<&str> = self.fabric_seeds.iter().map(|s| s.as_str()).collect();
+            Fabric::with_seeds(&refs)
+        };
+
+        let anchors = rpc.get_root_anchors().await
+            .map_err(|e| anyhow!("failed to fetch root anchors: {}", e))?;
+        let sets = AnchorSets::from_anchors(anchors.clone());
+        fabric.trust_from_set(sets.latest()
+            .ok_or_else(|| anyhow!("no anchor sets available"))?)?;
+
+        let raw = fabric.export(handle).await
+            .map_err(|e| anyhow!("failed to export certificate chain: {}", e))?;
+        let spacecert = CertificateChain::from_slice(&raw)
+            .map_err(|e| anyhow!("invalid certificate chain: {}", e))?;
+
+        let mut builder = MessageBuilder::new();
+        builder.add_chain(spacecert);
+
+        let req = builder.chain_proof_request();
+        let raw_proof = fabric.prove(&req).await
+            .map_err(|e| anyhow!("failed to build chain proof: {}", e))?;
+        let proof = ChainProof::from_slice(&raw_proof)
+            .map_err(|e| anyhow!("invalid chain proof: {}", e))?;
+
+        let (msg, _) = builder.build(proof)
+            .map_err(|e| anyhow!("failed to build message: {}", e))?;
+
+        Ok(VerificationBundle {
+            message: msg.to_bytes(),
+            anchors,
+        })
+    }
+
     /// Resolve a handle via the certrelay network and return its verified zone.
-    pub async fn resolve(&self, handles: &[&str]) -> anyhow::Result<Vec<libveritas::Zone>> {
+    pub async fn resolve(&self, handles: &[&str]) -> anyhow::Result<Vec<ResolvedZone>> {
         let fabric = self.require_fabric()?;
+
         // Refresh anchors before querying so we have the latest chain state
-        if let Err(e) = fabric.update_anchors(None).await {
-            log::warn!("Failed to refresh anchors: {}", e);
-        }
-        let mut zones = fabric.resolve_all(handles).await
+        let anchors = self.require_rpc()?.get_root_anchors().await?;
+        let sets = AnchorSets::from_anchors(anchors);
+        _ = fabric.trust_from_set(sets.latest().unwrap())?;
+
+        let rb = fabric.resolve_all(handles).await
             .map_err(|e| anyhow!("resolve error: {}", e))?;
 
-        // Return zones ordered by the input query order
-        let mut result = Vec::new();
-        for &h in handles {
-            // Extract the root space from the handle (e.g. "alice@space" -> "@space")
-            let root = if let Some(pos) = h.find('@') { &h[pos..] } else { h };
-            // Take the root zone first, then the handle zone
-            if let Some(z) = zones.remove(root) { result.push(z); }
-            if root != h {
-                if let Some(z) = zones.remove(h) { result.push(z); }
+        let results = rb.zones.into_iter().map(|zone| {
+            let badge = fabric.badge_for(zone.sovereignty, &rb.roots);
+            ResolvedZone {
+                badge: match badge {
+                    Badge::Orange => "orange",
+                    Badge::Unverified => "unverified",
+                    Badge::None => "none",
+                }.to_string(),
+                zone,
             }
-        }
-        // Add any remaining zones not yet included
-        for (_name, zone) in zones {
-            result.push(zone);
-        }
-        Ok(result)
+        }).collect();
+
+        Ok(results)
     }
 
     /// Get a loaded space by name. Briefly locks the spaces map.
@@ -424,9 +495,61 @@ impl Operator {
     }
 
     /// Get status of a loaded space.
+    /// Check if a space has an unknown on-chain commitment.
+    async fn check_commitment_health(&self, space: &SLabel) -> anyhow::Result<Option<HealthWarning>> {
+        let Some(rpc) = &self.rpc else { return Ok(None) };
+        use spaces_client::rpc::RpcClient;
+
+        let on_chain = rpc.get_commitment(space.clone().into(), None).await?;
+        let Some(chain) = on_chain else { return Ok(None) };
+
+        let chain_root = hex::encode(chain.state_root);
+        let local_space = self.get_local_space(space)?;
+        let known = local_space.storage().get_commitment_by_root(&chain_root).await?.is_some();
+
+        if known {
+            Ok(None)
+        } else {
+            const FINALITY: u32 = 144;
+            let tip_height = rpc.get_server_info().await?.tip.height;
+            let confirmations = tip_height.saturating_sub(chain.block_height);
+            let blocks_until_finalized = FINALITY.saturating_sub(confirmations);
+
+            // Rollback only makes sense if not finalized AND prev_root
+            // is either None (genesis) or matches a known local commitment
+            let rollback_lands_known = match chain.prev_root {
+                None => true,
+                Some(prev) => local_space.storage().get_commitment_by_root(&hex::encode(prev)).await?.is_some(),
+            };
+            let can_rollback = confirmations < FINALITY && rollback_lands_known;
+
+            Ok(Some(HealthWarning {
+                message: "This space has an on-chain commitment that is not tracked locally. \
+                          All actions are disabled until recovery is supported. \
+                          To recover in the future, you will need the .sdb file \
+                          (name database) and the certificate that was used to prove it.".to_string(),
+                chain_root,
+                block_height: chain.block_height,
+                commit_txid: None,
+                can_rollback,
+                blocks_until_finalized,
+            }))
+        }
+    }
+
+    /// Bail if the space has an untracked on-chain commitment.
+    async fn require_healthy(&self, space: &SLabel) -> anyhow::Result<()> {
+        if let Some(w) = self.check_commitment_health(space).await? {
+            return Err(anyhow!("{}", w.message));
+        }
+        Ok(())
+    }
+
     pub async fn get_space_status(&self, space: &SLabel) -> anyhow::Result<SpaceStatus> {
         let local_space = self.get_local_space(space)?;
-        local_space.status().await
+        let mut status = local_space.status().await?;
+        status.health_warning = self.check_commitment_health(space).await?;
+        Ok(status)
     }
 
     /// List handles for a space with pagination, optional search and filter.
@@ -462,6 +585,7 @@ impl Operator {
                     commitment_idx: h.commitment_idx,
                     publish_status: h.publish_status,
                     parked: h.parked,
+                    dev_private_key: h.dev_private_key,
                 })
                 .collect(),
             total,
@@ -493,6 +617,7 @@ impl Operator {
                 commitment_idx: h.commitment_idx,
                 publish_status: h.publish_status,
                 parked: h.parked,
+                dev_private_key: h.dev_private_key,
             })
             .collect())
     }
@@ -517,6 +642,7 @@ impl Operator {
             commitment_idx: h.commitment_idx,
             publish_status: h.publish_status,
             parked: h.parked,
+            dev_private_key: h.dev_private_key,
         }))
     }
 
@@ -558,7 +684,7 @@ impl Operator {
     pub async fn list_delegated_spaces(&self) -> anyhow::Result<Vec<SLabel>> {
         let rpc = self.require_rpc()?;
         let response = rpc
-            .wallet_list_nums(&self.wallet)
+            .wallet_list_nums(&self.wallet, None)
             .await
             .map_err(|e| anyhow!("failed to list ptrs: {}", e))?;
 
@@ -646,6 +772,7 @@ impl Operator {
         for (space, space_requests) in by_space {
             // Ensure space is loaded
             self.load_or_create_space(&space).await?;
+            self.require_healthy(&space).await?;
 
             let local_space = self.get_local_space(&space)?;
 
@@ -766,6 +893,7 @@ impl Operator {
         &self,
         space: &SLabel,
     ) -> anyhow::Result<crate::core::SpaceCommitResult> {
+        self.require_healthy(space).await?;
         // Check if we can commit
         if let Some(reason) = self.can_commit_local(space).await? {
             return Err(anyhow!("cannot commit: {}", reason));
@@ -884,6 +1012,7 @@ impl Operator {
     /// Broadcasts a transaction to commit the state root on-chain.
     /// Returns the transaction ID. If fee_rate is None, uses wallet default.
     pub async fn commit(&self, space: &SLabel, fee_rate: Option<FeeRate>) -> anyhow::Result<Txid> {
+        self.require_healthy(space).await?;
         // Verify we can still operate on this space (delegation may have been revoked)
         let can_op = self.can_operate(space).await?;
         if !can_op {
@@ -1371,7 +1500,7 @@ impl Operator {
         }
 
         for space_data in space_datas {
-            let space = SName::from_space(&space_data.info.space).unwrap();
+            let space = SName::from_space(&space_data.info.space);
             let root_cert = space_data
                 .info
                 .issue_cert(rpc, &self.wallet, &space)

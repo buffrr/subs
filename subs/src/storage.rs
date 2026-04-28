@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS handles (
     commitment_idx INTEGER, -- NULL if staged, set to commitment idx when committed
     publish_status TEXT,   -- NULL = not published, 'temp' = temp cert, 'final' = final cert
     published_temp_at_tip TEXT, -- on-chain tip root when temp cert was issued
-    parked INTEGER NOT NULL DEFAULT 0 -- 1 = excluded from next commit
+    parked INTEGER NOT NULL DEFAULT 0, -- 1 = excluded from next commit
+    dev_private_key TEXT   -- testing only: WIF key auto-generated when no script_pubkey provided
 );
 
 INSERT OR IGNORE INTO chain (id) VALUES (1);
@@ -84,6 +85,8 @@ pub struct Handle {
     pub published_temp_at_tip: Option<String>,
     /// If true, excluded from next commit_local
     pub parked: bool,
+    /// Testing only: WIF private key when auto-generated (not for production use)
+    pub dev_private_key: Option<String>,
 }
 
 /// Selector for querying handles for publishing.
@@ -479,15 +482,16 @@ impl Storage {
     // Handles
 
     /// Add a handle to the handles table (staged, with NULL commitment_root)
-    pub async fn add_handle(&self, name: &str, script_pubkey: &[u8]) -> anyhow::Result<()> {
+    pub async fn add_handle(&self, name: &str, script_pubkey: &[u8], dev_private_key: Option<&str>) -> anyhow::Result<()> {
         let conn = self.conn.clone();
         let name = name.to_string();
         let script_pubkey = script_pubkey.to_vec();
+        let dev_private_key = dev_private_key.map(|s| s.to_string());
         spawn_blocking(move || {
             let conn = conn.lock().unwrap();
             conn.execute(
-                "INSERT OR REPLACE INTO handles (name, script_pubkey, commitment_root) VALUES (?, ?, NULL)",
-                params![name, script_pubkey],
+                "INSERT OR REPLACE INTO handles (name, script_pubkey, commitment_root, dev_private_key) VALUES (?, ?, NULL, ?)",
+                params![name, script_pubkey, dev_private_key],
             )?;
             Ok(())
         })
@@ -501,7 +505,7 @@ impl Storage {
             let conn = conn.lock().unwrap();
             let handle = conn
                 .query_row(
-                    "SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status, published_temp_at_tip, parked FROM handles WHERE name = ?",
+                    "SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status, published_temp_at_tip, parked, dev_private_key FROM handles WHERE name = ?",
                     params![name],
                     |row| {
                         Ok(Handle {
@@ -513,6 +517,7 @@ impl Storage {
                             publish_status: row.get(5)?,
                             published_temp_at_tip: row.get(6)?,
                             parked: row.get::<_, i64>(7)? != 0,
+                            dev_private_key: row.get(8)?,
                         })
                     },
                 )
@@ -527,7 +532,7 @@ impl Storage {
         spawn_blocking(move || {
             let conn = conn.lock().unwrap();
             let mut stmt = conn
-                .prepare("SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status, published_temp_at_tip, parked FROM handles ORDER BY name ASC")?;
+                .prepare("SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status, published_temp_at_tip, parked, dev_private_key FROM handles ORDER BY name ASC")?;
             let handles = stmt
                 .query_map([], |row| {
                     Ok(Handle {
@@ -539,6 +544,7 @@ impl Storage {
                         publish_status: row.get(5)?,
                         published_temp_at_tip: row.get(6)?,
                         parked: row.get::<_, i64>(7)? != 0,
+                            dev_private_key: row.get(8)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -578,7 +584,7 @@ impl Storage {
             let conn = conn.lock().unwrap();
             let (where_clause, mut params) = build_handle_filter(&search, &filter);
             let sql = format!(
-                "SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status, published_temp_at_tip, parked FROM handles{} ORDER BY id DESC LIMIT ? OFFSET ?",
+                "SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status, published_temp_at_tip, parked, dev_private_key FROM handles{} ORDER BY id DESC LIMIT ? OFFSET ?",
                 where_clause
             );
             params.push(limit.to_string());
@@ -595,6 +601,7 @@ impl Storage {
                         publish_status: row.get(5)?,
                         published_temp_at_tip: row.get(6)?,
                         parked: row.get::<_, i64>(7)? != 0,
+                            dev_private_key: row.get(8)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -609,7 +616,7 @@ impl Storage {
         spawn_blocking(move || {
             let conn = conn.lock().unwrap();
             let mut stmt = conn
-                .prepare("SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status, published_temp_at_tip, parked FROM handles WHERE commitment_root IS NULL AND parked = 0 ORDER BY id ASC")?;
+                .prepare("SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status, published_temp_at_tip, parked, dev_private_key FROM handles WHERE commitment_root IS NULL AND parked = 0 ORDER BY id ASC")?;
             let handles = stmt
                 .query_map([], |row| {
                     Ok(Handle {
@@ -621,6 +628,7 @@ impl Storage {
                         publish_status: row.get(5)?,
                         published_temp_at_tip: row.get(6)?,
                         parked: row.get::<_, i64>(7)? != 0,
+                            dev_private_key: row.get(8)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -731,7 +739,7 @@ impl Storage {
         spawn_blocking(move || {
             let conn = conn.lock().unwrap();
             let mut stmt = conn.prepare(
-                "SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status, published_temp_at_tip, parked FROM handles WHERE commitment_root = ? ORDER BY name ASC",
+                "SELECT id, name, script_pubkey, commitment_root, commitment_idx, publish_status, published_temp_at_tip, parked, dev_private_key FROM handles WHERE commitment_root = ? ORDER BY name ASC",
             )?;
             let handles = stmt
                 .query_map(params![root], |row| {
@@ -744,6 +752,7 @@ impl Storage {
                         publish_status: row.get(5)?,
                         published_temp_at_tip: row.get(6)?,
                         parked: row.get::<_, i64>(7)? != 0,
+                            dev_private_key: row.get(8)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -916,7 +925,7 @@ impl Storage {
         let conn = self.conn.clone();
         spawn_blocking(move || {
             let conn = conn.lock().unwrap();
-            let cols = "id, name, script_pubkey, commitment_root, commitment_idx, publish_status, published_temp_at_tip, parked";
+            let cols = "id, name, script_pubkey, commitment_root, commitment_idx, publish_status, published_temp_at_tip, parked, dev_private_key";
             let map_row = |row: &rusqlite::Row| -> rusqlite::Result<Handle> {
                 Ok(Handle {
                     id: row.get(0)?,
@@ -927,6 +936,7 @@ impl Storage {
                     publish_status: row.get(5)?,
                     published_temp_at_tip: row.get(6)?,
                     parked: row.get::<_, i64>(7)? != 0,
+                            dev_private_key: row.get(8)?,
                 })
             };
             match selector {

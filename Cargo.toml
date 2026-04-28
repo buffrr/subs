@@ -3,14 +3,14 @@ resolver = "2"
 members = ["subs", "prover", "types", "subsd", "examples/registry-server"]
 
 [workspace.dependencies]
-libveritas = { git = "http://github.com/spacesprotocol/libveritas.git", features = ["elf"] }
-libveritas_zk = { git = "http://github.com/spacesprotocol/libveritas.git"}
-libveritas_testutil = { git = "http://github.com/spacesprotocol/libveritas.git" }
+libveritas = { version = "=0.1.2", features = ["elf"] }
+libveritas_zk = "=0.1.1"
+libveritas_testutil = "=0.1.2"
 subs-types = { path = "types" }
 subs-prover = { path = "prover" }
-spacedb = { git = "https://github.com/spacesprotocol/spacedb.git", version = "0.0.12" }
-relay = { path = "/Users/adams/RustroverProjects/itsparis/certrelay/relay" }
-fabric = { path = "/Users/adams/RustroverProjects/itsparis/certrelay/fabric/rust/" }
+spacedb = "0.1"
+relay = { git = "https://github.com/spacesprotocol/certrelay.git" }
+fabric = { package = "fabric-resolver", version = "=0.1.2" }
 
 
 

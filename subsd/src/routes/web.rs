@@ -19,10 +19,6 @@ pub struct DashboardTemplate {
 }
 
 #[derive(Template)]
-#[template(path = "requests.html")]
-pub struct RequestsTemplate;
-
-#[derive(Template)]
 #[template(path = "operate.html")]
 pub struct OperateTemplate {
     pub space_address: String,
@@ -35,6 +31,10 @@ pub struct QueryTemplate;
 #[derive(Template)]
 #[template(path = "settings.html")]
 pub struct SettingsTemplate;
+
+#[derive(Template)]
+#[template(path = "transactions.html")]
+pub struct TransactionsTemplate;
 
 #[derive(Template)]
 #[template(path = "space.html")]
@@ -74,12 +74,6 @@ pub async fn dashboard(State(state): State<AppState>) -> Html<String> {
     Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
 }
 
-/// GET /ui/requests - Add requests page
-pub async fn requests_page() -> Html<String> {
-    let template = RequestsTemplate;
-    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
-}
-
 /// GET /ui/operate - Operate space page
 pub async fn operate_page(State(state): State<AppState>) -> Html<String> {
     let wallet_name = state.operator.wallet().to_string();
@@ -105,6 +99,12 @@ pub async fn query_page() -> Html<String> {
 /// GET /ui/settings - Settings page
 pub async fn settings_page() -> Html<String> {
     let template = SettingsTemplate;
+    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+}
+
+/// GET /ui/transactions - Wallet transactions page
+pub async fn transactions_page() -> Html<String> {
+    let template = TransactionsTemplate;
     Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
 }
 

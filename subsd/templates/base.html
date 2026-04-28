@@ -163,7 +163,7 @@ body {
   font-family: var(--mono); font-size: 12px; font-weight: 600;
   color: #000; background: var(--accent); border: none;
   border-radius: 6px; padding: 7px 14px;
-  cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   transition: background 0.15s; letter-spacing: 0.01em;
 }
 .btn-primary:hover { background: #eb7e3a; }
@@ -393,11 +393,23 @@ textarea.input-field { resize: none; }
 .console-bar {
   position: fixed; bottom: 0; left: 56px; right: 0;
   background: var(--bg-surface); border-top: 1px solid var(--border);
-  z-index: 20;
+  z-index: 20; display: flex; flex-direction: column;
 }
+.console-resize-handle {
+  height: 5px; cursor: ns-resize; background: transparent;
+  position: relative; flex-shrink: 0;
+}
+.console-resize-handle::after {
+  content: ''; position: absolute; left: 50%; top: 1px;
+  transform: translateX(-50%); width: 36px; height: 3px;
+  border-radius: 2px; background: var(--border);
+  opacity: 0; transition: opacity 0.15s;
+}
+.console-resize-handle:hover::after { opacity: 1; }
 .console-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 6px 17px; cursor: pointer; transition: background 0.1s;
+  flex-shrink: 0;
 }
 .console-header:hover { background: rgba(255,255,255,0.02); }
 .console-label {
@@ -443,18 +455,153 @@ textarea.input-field { resize: none; }
 .console-body {
   padding: 12px 17px 17px;
   border-top: 1px solid var(--border-subtle);
+  flex: 1; overflow: hidden; display: flex; flex-direction: column;
 }
 .console-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  flex: 1; min-height: 0;
 }
+.console-grid > div { display: flex; flex-direction: column; min-height: 0; }
 @media (max-width: 900px) { .console-grid { grid-template-columns: 1fr; } }
 .console-response {
   background: var(--bg-base); border: 1px solid var(--border-subtle);
   border-radius: 6px; padding: 10px;
   font-family: var(--mono); font-size: 12px; color: var(--text-secondary);
-  overflow-x: auto; height: 186px; overflow-y: auto;
+  overflow-x: auto; flex: 1; min-height: 120px; overflow-y: auto;
   white-space: pre-wrap;
 }
+.console-params-area { flex: 1; min-height: 60px; margin-bottom: 10px; resize: none; }
+.autocomplete-wrap { position: relative; }
+.autocomplete-list {
+  position: absolute; left: 0; right: 0; top: 100%;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: 6px; max-height: 220px; overflow-y: auto;
+  z-index: 30; display: none; box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+}
+.autocomplete-list.open { display: block; }
+.ac-item {
+  padding: 6px 10px; cursor: pointer; transition: background 0.1s;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ac-item:last-child { border-bottom: none; }
+.ac-item:hover, .ac-item.selected { background: var(--bg-hover); }
+.ac-name {
+  font-family: var(--mono); font-size: 12px; font-weight: 500;
+  color: var(--accent);
+}
+.ac-desc {
+  font-family: var(--mono); font-size: 10px; color: var(--text-muted);
+  margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ac-params {
+  font-family: var(--mono); font-size: 10px; color: var(--text-muted);
+  opacity: 0.6;
+}
+.ac-section {
+  padding: 4px 10px; font-family: var(--mono); font-size: 9px;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted); opacity: 0.6;
+  background: var(--bg-base); border-bottom: 1px solid var(--border-subtle);
+}
+
+/* === SEND REQUEST FORM === */
+.wsr-form { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+.wsr-top { display: flex; gap: 8px; flex-shrink: 0; }
+.wsr-type-wrap { flex: 1; position: relative; }
+.wsr-type-list {
+  position: absolute; left: 0; right: 0; top: 100%;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: 6px; max-height: 200px; overflow-y: auto;
+  z-index: 31; display: none; box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+}
+.wsr-type-list.open { display: block; }
+.wsr-request-area { flex: 1; min-height: 60px; resize: none; }
+.wsr-opts {
+  display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+  padding: 6px 0;
+}
+.wsr-opt-label {
+  display: flex; align-items: center; gap: 4px;
+  font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+  cursor: pointer; user-select: none;
+}
+.wsr-opt-label input[type="checkbox"] {
+  width: 13px; height: 13px; accent-color: var(--accent); cursor: pointer;
+}
+.wsr-fee-input {
+  font-family: var(--mono); font-size: 11px;
+  color: var(--text-primary); background: var(--bg-base);
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 2px 6px; width: 50px; outline: none;
+}
+.wsr-fee-input:focus { border-color: var(--accent); }
+.wsr-btns { display: flex; gap: 6px; flex-shrink: 0; }
+.wsr-btns .btn-primary, .wsr-btns .btn-secondary { flex: 1; text-align: center; }
+.btn-secondary {
+  font-family: var(--mono); font-size: 12px; font-weight: 500;
+  padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg-raised); color: var(--text-secondary);
+  cursor: pointer; transition: all 0.15s;
+}
+.btn-secondary:hover { border-color: var(--text-muted); color: var(--text-primary); }
+
+/* === FEE RATE MODAL === */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  z-index: 100; display: flex; align-items: center; justify-content: center;
+  animation: fadeIn 0.12s ease-out;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal-box {
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px; width: 340px; max-width: 90vw;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  animation: slideUp 0.15s ease-out;
+}
+@keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.modal-title {
+  font-family: var(--mono); font-size: 12px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-primary); margin-bottom: 14px;
+}
+.fee-tiers { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.fee-tier {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--border-subtle); background: var(--bg-base);
+  transition: all 0.12s;
+}
+.fee-tier:hover { border-color: var(--accent); background: var(--bg-hover); }
+.fee-tier.selected { border-color: var(--accent); background: var(--accent-dim); }
+.fee-tier-label {
+  font-family: var(--mono); font-size: 12px; color: var(--text-secondary);
+}
+.fee-tier-value {
+  font-family: var(--mono); font-size: 12px; font-weight: 600;
+  color: var(--text-primary);
+}
+.fee-tier-value .unit {
+  font-weight: 400; color: var(--text-muted); font-size: 10px;
+}
+.fee-custom-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 16px;
+}
+.fee-custom-input {
+  font-family: var(--mono); font-size: 13px;
+  color: var(--text-primary); background: var(--bg-base);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; width: 80px; outline: none; text-align: right;
+}
+.fee-custom-input:focus { border-color: var(--accent); }
+.fee-custom-label {
+  font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+}
+.fee-loading {
+  text-align: center; padding: 16px;
+  font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+}
+.modal-actions { display: flex; gap: 8px; }
+.modal-actions .btn-primary, .modal-actions .btn-secondary { flex: 1; text-align: center; }
 
 /* === FORM HELPERS === */
 .form-label {
@@ -514,6 +661,11 @@ textarea.input-field { resize: none; }
 .alert-error { background: var(--red-dim); border: 1px solid rgba(224,82,82,0.16); color: var(--red); }
 .alert-warning { background: var(--yellow-dim); border: 1px solid rgba(212,169,78,0.16); color: var(--yellow); }
 
+.space-disabled {
+  position: relative; pointer-events: none; user-select: none;
+  filter: blur(2px) saturate(0.3); opacity: 0.45;
+}
+
 /* === CODE BLOCKS === */
 pre.code-block {
   background: var(--bg-base); border: 1px solid var(--border-subtle);
@@ -538,6 +690,21 @@ pre.code-block {
 .stage-form { padding: 14px 17px; border-bottom: 1px solid var(--border-subtle); }
 .stage-form .input-row { display: flex; align-items: flex-end; gap: 10px; }
 .stage-form .input-group { flex: 1; }
+.bulk-drop-zone {
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 28px 20px;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+  cursor: pointer;
+}
+.bulk-drop-zone:hover, .bulk-drop-zone.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.bulk-drop-content {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
 
 /* === ACTIVITY LOG === */
 .activity-log {
@@ -635,12 +802,14 @@ pre.code-block {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
             </a>
             <span class="hidden">{% block nav_query_icon %}{% endblock %}</span>
+            <a href="/ui/transactions" class="sidebar-item {% block nav_txns %}{% endblock %} {% block nav_txns_cls %}{% endblock %}" title="Transactions">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+            </a>
             <span class="hidden">{% block nav_certs %}{% endblock %}{% block nav_certs_cls %}{% endblock %}{% block nav_certs_icon %}{% endblock %}</span>
             <a href="/ui/settings" class="sidebar-item {% block nav_settings %}{% endblock %} {% block nav_settings_cls %}{% endblock %}" title="Settings">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             </a>
             <span class="hidden">{% block nav_settings_icon %}{% endblock %}</span>
-            <span class="hidden">{% block nav_requests %}{% endblock %}{% block nav_requests_cls %}{% endblock %}{% block nav_requests_icon %}{% endblock %}</span>
             <div class="sidebar-spacer"></div>
         </nav>
 
@@ -664,6 +833,7 @@ pre.code-block {
     </div>
 
     <div id="rpc-console" class="console-bar">
+        <div id="console-resize" class="console-resize-handle"></div>
         <div class="console-header" onclick="toggleConsole()">
             <span class="console-label" id="console-toggle">▸ Console</span>
             <div class="console-right" onclick="event.stopPropagation()">
@@ -694,10 +864,41 @@ pre.code-block {
             <div class="console-grid">
                 <div>
                     <label class="form-label">Method</label>
-                    <input type="text" id="rpc-method" placeholder="e.g. getserverinfo" class="input-field w-full" style="margin-bottom:10px">
-                    <label class="form-label">Params</label>
-                    <textarea id="rpc-params" placeholder='["@bitcoin"]' rows="4" class="input-field w-full" style="margin-bottom:10px"></textarea>
-                    <button onclick="sendRpcCommand()" class="btn-primary w-full">Send</button>
+                    <div class="autocomplete-wrap">
+                        <input type="text" id="rpc-method" placeholder="e.g. getserverinfo" class="input-field w-full" autocomplete="off">
+                        <div id="ac-dropdown" class="autocomplete-list scrollbar-thin"></div>
+                    </div>
+                    <!-- Generic params (non-walletsendrequest) -->
+                    <div id="generic-params">
+                        <label class="form-label">Params</label>
+                        <textarea id="rpc-params" placeholder='["@bitcoin"]' class="input-field w-full console-params-area"></textarea>
+                        <button onclick="sendRpcCommand()" class="btn-primary w-full" style="flex-shrink:0">Send</button>
+                    </div>
+                    <!-- walletsendrequest form -->
+                    <div id="wsr-panel" class="wsr-form" style="display:none">
+                        <div class="wsr-top">
+                            <div class="wsr-type-wrap">
+                                <input type="text" id="wsr-type" placeholder="Request type..." class="input-field w-full" autocomplete="off">
+                                <div id="wsr-type-dropdown" class="wsr-type-list scrollbar-thin"></div>
+                            </div>
+                        </div>
+                        <label class="form-label">Request body <span class="hint">(the request object inside requests[])</span></label>
+                        <textarea id="wsr-request-body" placeholder='{"request":"open","name":"@space","amount":1000}' class="input-field w-full wsr-request-area"></textarea>
+                        <div class="wsr-opts">
+                            <label class="wsr-opt-label"><input type="checkbox" id="wsr-force"> force</label>
+                            <label class="wsr-opt-label"><input type="checkbox" id="wsr-skip-tx"> skip_tx_check</label>
+                            <label class="wsr-opt-label"><input type="checkbox" id="wsr-confirmed"> confirmed_only</label>
+                            <span style="margin-left:auto; display:flex; align-items:center; gap:4px">
+                                <span class="wsr-opt-label">fee_rate: <strong id="wsr-fee-display" style="color:var(--text-primary)">auto</strong></span>
+                                <button onclick="openFeeModal('wsr')" class="console-cmd" style="padding:2px 6px">change</button>
+                            </span>
+                            <input type="hidden" id="wsr-fee-rate" value="">
+                        </div>
+                        <div class="wsr-btns">
+                            <button onclick="sendWsrCommand()" class="btn-primary">Send</button>
+                            <button onclick="showWsrJson()" class="btn-secondary">View JSON</button>
+                        </div>
+                    </div>
                 </div>
                 <div>
                     <label class="form-label">Response</label>
@@ -707,11 +908,139 @@ pre.code-block {
         </div>
     </div>
 
+    <!-- Fee Rate Modal -->
+    <div id="fee-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeFeeModal()">
+        <div class="modal-box">
+            <div class="modal-title">Fee Rate</div>
+            <div id="fee-modal-tiers" class="fee-tiers">
+                <div class="fee-loading">Loading fee estimates...</div>
+            </div>
+            <div class="fee-custom-row">
+                <span class="fee-custom-label">Custom:</span>
+                <input type="text" id="fee-modal-custom" placeholder="sat/vB" class="fee-custom-input"
+                       oninput="selectFeeTier(null, null)">
+                <span class="fee-custom-label">sat/vB</span>
+            </div>
+            <div class="modal-actions">
+                <button onclick="closeFeeModal()" class="btn-secondary">Cancel</button>
+                <button onclick="confirmFeeModal()" class="btn-primary">Confirm</button>
+            </div>
+        </div>
+    </div>
+
     <script>
     /* --- State --- */
     let selectedEndpoint = 'spaced';
     let endpoints = { spaced: null, bitcoin: null };
     let walletName = 'wallet';
+
+    /** Convert sat/vB to FeeRate (sat/kwu) for RPC. 1 sat/vB = 250 sat/kwu. Returns null if input is null. */
+    function toRpcFeeRate(satPerVb) {
+        if (satPerVb == null) return null;
+        return Math.round(satPerVb * 250);
+    }
+
+    /* --- Fee Rate Modal --- */
+    let feeModalCallback = null;   // function(feeRate) called on confirm
+    let feeModalSelected = null;   // selected tier value or null
+    let cachedFees = null;
+
+    const FEE_TIERS = [
+        { key: 'fastestFee',   label: 'Fastest',   desc: '~10 min' },
+        { key: 'halfHourFee',  label: 'Half hour',  desc: '~30 min' },
+        { key: 'hourFee',      label: '1 hour',     desc: '~60 min' },
+        { key: 'economyFee',   label: 'Economy',    desc: 'low priority' },
+        { key: 'minimumFee',   label: 'Minimum',    desc: 'no rush' },
+    ];
+
+    async function fetchFees() {
+        if (cachedFees) return cachedFees;
+        try {
+            const r = await fetch('/fees');
+            if (r.ok) cachedFees = await r.json();
+        } catch (_) {}
+        // Expire cache after 60s
+        setTimeout(() => { cachedFees = null; }, 60000);
+        return cachedFees;
+    }
+
+    function openFeeModal(source, callback) {
+        const modal = document.getElementById('fee-modal');
+        const tiersEl = document.getElementById('fee-modal-tiers');
+        const customEl = document.getElementById('fee-modal-custom');
+
+        feeModalSelected = null;
+        customEl.value = '';
+        tiersEl.innerHTML = '<div class="fee-loading">Loading fee estimates...</div>';
+        modal.style.display = '';
+
+        if (source === 'wsr') {
+            // Callback sets the wsr hidden input + display
+            feeModalCallback = (rate) => {
+                document.getElementById('wsr-fee-rate').value = rate === null ? '' : rate;
+                document.getElementById('wsr-fee-display').textContent = rate === null ? 'auto' : rate + ' sat/vB';
+            };
+        } else if (typeof callback === 'function') {
+            feeModalCallback = callback;
+        }
+
+        fetchFees().then(fees => {
+            tiersEl.innerHTML = FEE_TIERS.map((t, i) => {
+                const val = fees ? fees[t.key] : undefined;
+                const available = val !== undefined && val !== null;
+                if (available) {
+                    return `<div class="fee-tier" data-idx="${i}" data-value="${val}" onclick="selectFeeTier(${i}, ${val})">
+                        <span class="fee-tier-label">${t.label} <span style="opacity:0.5">${t.desc}</span></span>
+                        <span class="fee-tier-value">${val} <span class="unit">sat/vB</span></span>
+                    </div>`;
+                } else {
+                    return `<div class="fee-tier" style="opacity:0.4; cursor:default">
+                        <span class="fee-tier-label">${t.label} <span style="opacity:0.5">${t.desc}</span></span>
+                        <span class="fee-tier-value">-- <span class="unit">sat/vB</span></span>
+                    </div>`;
+                }
+            }).join('');
+
+            // Auto-select fastest if available
+            const fastest = fees ? fees[FEE_TIERS[0].key] : undefined;
+            if (fastest !== undefined && fastest !== null) {
+                selectFeeTier(0, fastest);
+            }
+        });
+    }
+
+    function selectFeeTier(idx, val) {
+        feeModalSelected = val;
+        document.querySelectorAll('.fee-tier').forEach(el => {
+            el.classList.toggle('selected', el.dataset.idx == idx);
+        });
+        if (val !== null) document.getElementById('fee-modal-custom').value = '';
+    }
+
+    function closeFeeModal() {
+        document.getElementById('fee-modal').style.display = 'none';
+        feeModalCallback = null;
+    }
+
+    function confirmFeeModal() {
+        const custom = document.getElementById('fee-modal-custom').value.trim();
+        let rate = null;
+        if (custom) {
+            rate = parseFloat(custom);
+            if (isNaN(rate)) rate = null;
+        } else if (feeModalSelected !== null) {
+            rate = feeModalSelected;
+        }
+        if (feeModalCallback) feeModalCallback(rate);
+        closeFeeModal();
+    }
+
+    // Close on Escape
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && document.getElementById('fee-modal').style.display !== 'none') {
+            closeFeeModal();
+        }
+    });
 
     /* --- Clipboard --- */
     function copyToClipboard(text, btn) {
@@ -723,12 +1052,39 @@ pre.code-block {
         });
     }
 
-    /* --- Console toggle --- */
+    /* --- Console toggle & resize --- */
+    const CONSOLE_MIN_H = 200;
+    const CONSOLE_MAX_H = Math.floor(window.innerHeight * 0.8);
+    const CONSOLE_DEFAULT_H = 340;
+
+    function getConsoleHeight() {
+        return parseInt(localStorage.getItem('console-h')) || CONSOLE_DEFAULT_H;
+    }
+    function setConsoleHeight(h) {
+        h = Math.max(CONSOLE_MIN_H, Math.min(CONSOLE_MAX_H, h));
+        localStorage.setItem('console-h', h);
+        applyConsoleHeight(h);
+    }
+    function applyConsoleHeight(h) {
+        const bar = document.getElementById('rpc-console');
+        const body = document.getElementById('console-body');
+        if (!body.classList.contains('hidden')) {
+            bar.style.height = h + 'px';
+        }
+    }
+
     function toggleConsole() {
+        const bar = document.getElementById('rpc-console');
         const body = document.getElementById('console-body');
         const toggle = document.getElementById('console-toggle');
         body.classList.toggle('hidden');
-        toggle.textContent = body.classList.contains('hidden') ? '▸ Console' : '▾ Console';
+        if (body.classList.contains('hidden')) {
+            toggle.textContent = '▸ Console';
+            bar.style.height = '';
+        } else {
+            toggle.textContent = '▾ Console';
+            applyConsoleHeight(getConsoleHeight());
+        }
     }
 
     function openConsole() {
@@ -736,20 +1092,47 @@ pre.code-block {
         if (body.classList.contains('hidden')) toggleConsole();
     }
 
+    /* Drag-to-resize */
+    (function initResize() {
+        const handle = document.getElementById('console-resize');
+        let dragging = false, startY = 0, startH = 0;
+
+        handle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            dragging = true;
+            startY = e.clientY;
+            startH = getConsoleHeight();
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!dragging) return;
+            const delta = startY - e.clientY;
+            setConsoleHeight(startH + delta);
+        });
+        document.addEventListener('mouseup', () => {
+            if (!dragging) return;
+            dragging = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        });
+    })();
+
     /* --- Console shortcuts --- */
     function fillCmd(method, params) {
         document.getElementById('rpc-method').value = method;
+        showWsrPanel(false);
         document.getElementById('rpc-params').value = JSON.stringify(params);
         openConsole();
     }
 
     function fillDelegate() {
         document.getElementById('rpc-method').value = 'walletsendrequest';
-        document.getElementById('rpc-params').value = JSON.stringify([walletName, {
-            requests: [{ request: 'delegate', space: '@space' }],
-            fee_rate: null, force: false,
-            confirmed_only: false, skip_tx_check: false
-        }], null, 2);
+        showWsrPanel(true);
+        document.getElementById('wsr-type').value = 'delegate';
+        document.getElementById('wsr-request-body').value = JSON.stringify(
+            { request: 'delegate', subject: '@space', to: 'bc1q...' }, null, 2
+        );
         openConsole();
     }
 
@@ -829,6 +1212,70 @@ pre.code-block {
         }
     }
 
+    /* --- walletsendrequest form panel --- */
+    function showWsrPanel(show) {
+        document.getElementById('generic-params').style.display = show ? 'none' : '';
+        document.getElementById('wsr-panel').style.display = show ? '' : 'none';
+    }
+
+    function buildWsrParams() {
+        const bodyStr = document.getElementById('wsr-request-body').value.trim();
+        let reqObj;
+        try { reqObj = JSON.parse(bodyStr); }
+        catch (e) { return { error: 'Invalid request JSON: ' + e.message }; }
+
+        const feeStr = document.getElementById('wsr-fee-rate').value.trim();
+        const feeRate = feeStr ? toRpcFeeRate(parseFloat(feeStr)) : null;
+
+        const builder = {
+            requests: Array.isArray(reqObj) ? reqObj : [reqObj],
+            fee_rate: feeRate,
+            force: document.getElementById('wsr-force').checked,
+            skip_tx_check: document.getElementById('wsr-skip-tx').checked,
+            confirmed_only: document.getElementById('wsr-confirmed').checked,
+        };
+
+        return { params: [walletName, builder] };
+    }
+
+    function sendWsrCommand() {
+        const output = document.getElementById('rpc-response');
+        // Validate request body before opening fee modal
+        const bodyStr = document.getElementById('wsr-request-body').value.trim();
+        if (!bodyStr) { output.textContent = 'Error: Request body is empty'; return; }
+        try { JSON.parse(bodyStr); } catch (e) { output.textContent = 'Error: Invalid request JSON: ' + e.message; return; }
+
+        openFeeModal(null, async (feeRate) => {
+            // Set fee rate from modal selection
+            document.getElementById('wsr-fee-rate').value = feeRate === null ? '' : feeRate;
+            document.getElementById('wsr-fee-display').textContent = feeRate === null ? 'auto' : feeRate + ' sat/vB';
+
+            const result = buildWsrParams();
+            if (result.error) { output.textContent = 'Error: ' + result.error; return; }
+
+            output.textContent = 'Sending...';
+            try {
+                const r = await fetch(`/rpc/spaced`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ method: 'walletsendrequest', params: result.params })
+                });
+                output.textContent = JSON.stringify(await r.json(), null, 2);
+            } catch (e) {
+                output.textContent = `Error: ${e.message}`;
+            }
+        });
+    }
+
+    function showWsrJson() {
+        const output = document.getElementById('rpc-response');
+        const result = buildWsrParams();
+        if (result.error) { output.textContent = 'Error: ' + result.error; return; }
+
+        const full = { jsonrpc: '2.0', id: 1, method: 'walletsendrequest', params: result.params };
+        output.textContent = JSON.stringify(full, null, 2);
+    }
+
     /* --- Init: load status bar --- */
     async function initRpcConsole() {
         try {
@@ -857,7 +1304,272 @@ pre.code-block {
         } catch (e) {}
     }
 
-    initRpcConsole();
+    const rpcReady = initRpcConsole();
+
+    /* --- RPC Schema Autocomplete --- */
+    let rpcSchema = [];        // [{name, description, params, extra_examples?}]
+    let wsrTemplates = [];     // [{label, reqBody}] extracted from extra_examples
+    let acIndex = -1;
+
+    async function fetchRpcSchema() {
+        try {
+            const r = await fetch('/rpc/spaced', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ method: 'rpc.schema', params: [] })
+            });
+            const data = await r.json();
+            if (data.result) {
+                rpcSchema = data.result;
+                // Extract walletsendrequest extra_examples as templates
+                const wsr = rpcSchema.find(m => m.name === 'walletsendrequest');
+                if (wsr && wsr.extra_examples) {
+                    wsrTemplates = wsr.extra_examples.map(([label, body]) => {
+                        // Pull just the request object from the example
+                        const req = (body.params && body.params[1] && body.params[1].requests)
+                            ? body.params[1].requests[0]
+                            : body;
+                        return { label, reqBody: req };
+                    });
+                }
+            }
+        } catch (e) {}
+    }
+    fetchRpcSchema();
+
+    function buildParamsExample(method) {
+        if (!method.params || method.params.length === 0) return '[]';
+        const examples = method.params.map(p => {
+            if (p.name === 'wallet') return walletName;
+            if (p.example !== undefined && p.example !== null) return p.example;
+            if (p.type === 'string') return p.description || '';
+            if (p.type === 'integer') return 0;
+            if (p.type === 'bool') return false;
+            return null;
+        });
+        return JSON.stringify(examples, null, 2);
+    }
+
+    function paramsHint(method) {
+        if (!method.params || method.params.length === 0) return '';
+        return '(' + method.params.map(p => p.name + (p.required ? '' : '?')).join(', ') + ')';
+    }
+
+    /* --- Method autocomplete dropdown --- */
+    function renderDropdown(filter) {
+        const dd = document.getElementById('ac-dropdown');
+        const q = filter.toLowerCase();
+        const matches = q
+            ? rpcSchema.filter(m => m.name.toLowerCase().includes(q))
+            : rpcSchema;
+
+        if (matches.length === 0 || (matches.length === 1 && matches[0].name === filter)) {
+            dd.classList.remove('open');
+            dd.innerHTML = '';
+            acIndex = -1;
+            return;
+        }
+
+        dd.innerHTML = matches.map((m, i) =>
+            `<div class="ac-item" data-idx="${i}" data-name="${m.name}">` +
+            `<div class="ac-name">${m.name} <span class="ac-params">${paramsHint(m)}</span></div>` +
+            `<div class="ac-desc">${m.description || ''}</div></div>`
+        ).join('');
+
+        dd.classList.add('open');
+        acIndex = -1;
+
+        dd.querySelectorAll('.ac-item').forEach(el => {
+            el.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                pickMethod(el.dataset.name);
+            });
+        });
+    }
+
+    function pickMethod(name) {
+        const dd = document.getElementById('ac-dropdown');
+        const input = document.getElementById('rpc-method');
+        input.value = name;
+        dd.classList.remove('open');
+        dd.innerHTML = '';
+        acIndex = -1;
+
+        if (name === 'walletsendrequest') {
+            showWsrPanel(true);
+            // Reset form to first template or empty
+            document.getElementById('wsr-type').value = '';
+            document.getElementById('wsr-request-body').value = '';
+            document.getElementById('wsr-force').checked = false;
+            document.getElementById('wsr-skip-tx').checked = false;
+            document.getElementById('wsr-confirmed').checked = false;
+            document.getElementById('wsr-fee-rate').value = '';
+            document.getElementById('wsr-fee-display').textContent = 'auto';
+            // Focus the type input and open its dropdown
+            setTimeout(() => {
+                document.getElementById('wsr-type').focus();
+                renderWsrTypeDropdown('');
+            }, 50);
+        } else {
+            showWsrPanel(false);
+            const m = rpcSchema.find(s => s.name === name);
+            if (m) {
+                document.getElementById('rpc-params').value = buildParamsExample(m);
+            }
+        }
+
+        input.focus();
+    }
+
+    /* --- walletsendrequest type autocomplete --- */
+    let wsrAcIndex = -1;
+
+    function renderWsrTypeDropdown(filter) {
+        const dd = document.getElementById('wsr-type-dropdown');
+        const q = filter.toLowerCase();
+        const matches = q
+            ? wsrTemplates.filter(t => t.label.toLowerCase().includes(q) ||
+                (t.reqBody.request && t.reqBody.request.toLowerCase().includes(q)))
+            : wsrTemplates;
+
+        if (matches.length === 0) {
+            dd.classList.remove('open');
+            dd.innerHTML = '';
+            wsrAcIndex = -1;
+            return;
+        }
+
+        dd.innerHTML = matches.map((t, i) => {
+            const reqType = t.reqBody.request || '?';
+            return `<div class="ac-item" data-idx="${i}" data-req="${reqType}">` +
+                `<div class="ac-name">${reqType}</div>` +
+                `<div class="ac-desc">${t.label}</div></div>`;
+        }).join('');
+
+        dd.classList.add('open');
+        wsrAcIndex = -1;
+
+        dd.querySelectorAll('.ac-item').forEach(el => {
+            el.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                pickWsrType(parseInt(el.dataset.idx), matches);
+            });
+        });
+    }
+
+    function pickWsrType(idx, matches) {
+        const dd = document.getElementById('wsr-type-dropdown');
+        dd.classList.remove('open');
+        dd.innerHTML = '';
+        wsrAcIndex = -1;
+
+        const list = matches || wsrTemplates;
+        const t = list[idx];
+        if (!t) return;
+
+        document.getElementById('wsr-type').value = t.reqBody.request || t.label;
+        document.getElementById('wsr-request-body').value = JSON.stringify(t.reqBody, null, 2);
+        document.getElementById('wsr-request-body').focus();
+    }
+
+    (function setupWsrTypeAutocomplete() {
+        const input = document.getElementById('wsr-type');
+        const dd = document.getElementById('wsr-type-dropdown');
+
+        input.addEventListener('input', () => renderWsrTypeDropdown(input.value.trim()));
+        input.addEventListener('focus', () => {
+            if (wsrTemplates.length > 0) renderWsrTypeDropdown(input.value.trim());
+        });
+        input.addEventListener('blur', () => {
+            setTimeout(() => { dd.classList.remove('open'); }, 150);
+        });
+
+        input.addEventListener('keydown', (e) => {
+            const items = dd.querySelectorAll('.ac-item');
+            if (!dd.classList.contains('open') || items.length === 0) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                wsrAcIndex = Math.min(wsrAcIndex + 1, items.length - 1);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                wsrAcIndex = Math.max(wsrAcIndex - 1, 0);
+            } else if (e.key === 'Enter' || e.key === 'Tab') {
+                e.preventDefault();
+                const target = (wsrAcIndex >= 0 && wsrAcIndex < items.length) ? wsrAcIndex : 0;
+                // Reconstruct filtered matches to pick correctly
+                const q = input.value.trim().toLowerCase();
+                const matches = q
+                    ? wsrTemplates.filter(t => t.label.toLowerCase().includes(q) ||
+                        (t.reqBody.request && t.reqBody.request.toLowerCase().includes(q)))
+                    : wsrTemplates;
+                pickWsrType(target, matches);
+                return;
+            } else if (e.key === 'Escape') {
+                dd.classList.remove('open');
+                wsrAcIndex = -1;
+                return;
+            } else {
+                return;
+            }
+
+            items.forEach((el, i) => el.classList.toggle('selected', i === wsrAcIndex));
+            if (wsrAcIndex >= 0) items[wsrAcIndex].scrollIntoView({ block: 'nearest' });
+        });
+    })();
+
+    /* --- Method input autocomplete --- */
+    (function setupAutocomplete() {
+        const input = document.getElementById('rpc-method');
+        const dd = document.getElementById('ac-dropdown');
+
+        input.addEventListener('input', () => {
+            renderDropdown(input.value.trim());
+            // Switch panel based on current value
+            const v = input.value.trim();
+            if (v === 'walletsendrequest') {
+                showWsrPanel(true);
+            } else {
+                showWsrPanel(false);
+            }
+        });
+        input.addEventListener('focus', () => {
+            if (rpcSchema.length > 0) renderDropdown(input.value.trim());
+        });
+        input.addEventListener('blur', () => {
+            setTimeout(() => { dd.classList.remove('open'); }, 150);
+        });
+
+        input.addEventListener('keydown', (e) => {
+            const items = dd.querySelectorAll('.ac-item');
+            if (!dd.classList.contains('open') || items.length === 0) {
+                if (e.key === 'Enter') { e.preventDefault(); sendRpcCommand(); }
+                return;
+            }
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                acIndex = Math.min(acIndex + 1, items.length - 1);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                acIndex = Math.max(acIndex - 1, 0);
+            } else if (e.key === 'Enter' || e.key === 'Tab') {
+                e.preventDefault();
+                const target = (acIndex >= 0 && acIndex < items.length) ? acIndex : 0;
+                pickMethod(items[target].dataset.name);
+                return;
+            } else if (e.key === 'Escape') {
+                dd.classList.remove('open');
+                acIndex = -1;
+                return;
+            } else {
+                return;
+            }
+
+            items.forEach((el, i) => el.classList.toggle('selected', i === acIndex));
+            if (acIndex >= 0) items[acIndex].scrollIntoView({ block: 'nearest' });
+        });
+    })();
     </script>
     {% block scripts %}{% endblock %}
 </body>

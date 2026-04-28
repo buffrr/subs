@@ -16,10 +16,10 @@ serde = "1.0"
 bitcoin = { version = "0.32.2", features = ["base64", "serde", "rand-std"] }
 spacedb = { workspace = true }
 
-spaces_protocol = { git = "https://github.com/spacesprotocol/spaces.git", branch = "subspaces", features = ["std"] }
-spaces_nums = { git = "https://github.com/spacesprotocol/spaces.git", branch = "subspaces", features = ["std"] }
-spaces_client = { git = "https://github.com/spacesprotocol/spaces.git", branch = "subspaces" }
-spaces_wallet = { git = "https://github.com/spacesprotocol/spaces.git", branch = "subspaces" }
+spaces_protocol = { version = "0.1", features = ["std"] }
+spaces_nums = { version = "0.1", features = ["std"] }
+spaces_client = { version = "0.1", features = ["schema"] }
+spaces_wallet = "0.1"
 fabric = { workspace = true }
 
 libveritas = { workspace = true }

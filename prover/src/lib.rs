@@ -44,7 +44,6 @@ pub fn build_bench_request(existing: usize, insert: usize) -> Result<ProvingRequ
         .map_err(|e| anyhow!("serialize proof: {:?}", e))?;
 
     let mut zk_batch = Vec::with_capacity(32 + insert * 64);
-    zk_batch.extend_from_slice(&[0u8; 32]); // space hash
     for key in &new_keys {
         zk_batch.extend_from_slice(key);
         zk_batch.extend_from_slice(&[0u8; 32]); // script pubkey hash

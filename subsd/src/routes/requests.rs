@@ -54,8 +54,10 @@ pub async fn generate_request(
 ) -> Result<Json<GenerateRequestResponse>, Response> {
     use bitcoin::key::Secp256k1;
     use bitcoin::secp256k1::rand;
-    use bitcoin::{PrivateKey, Network, Address, XOnlyPublicKey};
-    use libveritas::sname::SName;
+    use bitcoin::script::Builder;
+    use bitcoin::opcodes::all::OP_PUSHNUM_1;
+    use bitcoin::{PrivateKey, Network};
+    use spaces_protocol::sname::SName;
 
     let handle: SName = body
         .handle
@@ -65,15 +67,18 @@ pub async fn generate_request(
     let (script_pubkey, private_key) = if let Some(spk) = body.script_pubkey {
         (spk, None)
     } else {
-        // Generate new keypair
+        // Generate keypair with untweaked pubkey for signing
         let secp = Secp256k1::new();
-        let keypair = bitcoin::secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
-        let (xonly, _parity) = XOnlyPublicKey::from_keypair(&keypair);
+        let (secret_key, public_key) = secp.generate_keypair(&mut rand::thread_rng());
+        let (xonly, _parity) = public_key.x_only_public_key();
 
-        let address = Address::p2tr(&secp, xonly, None, Network::Bitcoin);
-        let spk = hex::encode(address.script_pubkey().as_bytes());
+        let script = Builder::new()
+            .push_opcode(OP_PUSHNUM_1)
+            .push_slice(xonly.serialize())
+            .into_script();
+        let spk = hex::encode(script.as_bytes());
 
-        let private_key = PrivateKey::new(keypair.secret_key(), Network::Bitcoin);
+        let private_key = PrivateKey::new(secret_key, Network::Bitcoin);
 
         (spk, Some(private_key.to_wif()))
     };
@@ -81,6 +86,7 @@ pub async fn generate_request(
     let request = HandleRequest {
         handle,
         script_pubkey,
+        dev_private_key: private_key.clone(),
     };
 
     Ok(Json(GenerateRequestResponse {
@@ -116,7 +122,9 @@ pub async fn bulk_generate(
 ) -> Result<Json<BulkGenerateResponse>, Response> {
     use bitcoin::key::Secp256k1;
     use bitcoin::secp256k1::rand;
-    use bitcoin::{Network, Address, XOnlyPublicKey};
+    use bitcoin::script::Builder;
+    use bitcoin::opcodes::all::OP_PUSHNUM_1;
+    use bitcoin::{PrivateKey, Network};
 
     if body.count == 0 {
         return Err(json_error(StatusCode::BAD_REQUEST, "count must be > 0"));
@@ -127,18 +135,24 @@ pub async fn bulk_generate(
 
     for i in 0..body.count {
         let handle_str = format!("{}{}{}", body.prefix, i, body.space);
-        let handle: libveritas::sname::SName = handle_str
+        let handle: spaces_protocol::sname::SName = handle_str
             .parse()
             .map_err(|e| json_error(StatusCode::BAD_REQUEST, format!("invalid handle {}: {}", handle_str, e)))?;
 
-        let keypair = bitcoin::secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
-        let (xonly, _parity) = XOnlyPublicKey::from_keypair(&keypair);
-        let address = Address::p2tr(&secp, xonly, None, Network::Bitcoin);
-        let script_pubkey = hex::encode(address.script_pubkey().as_bytes());
+        let (secret_key, public_key) = secp.generate_keypair(&mut rand::thread_rng());
+        let (xonly, _parity) = public_key.x_only_public_key();
 
+        let script = Builder::new()
+            .push_opcode(OP_PUSHNUM_1)
+            .push_slice(xonly.serialize())
+            .into_script();
+        let script_pubkey = hex::encode(script.as_bytes());
+
+        let private_key = PrivateKey::new(secret_key, Network::Bitcoin);
         requests.push(HandleRequest {
             handle,
             script_pubkey,
+            dev_private_key: Some(private_key.to_wif()),
         });
     }
 

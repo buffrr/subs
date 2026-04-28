@@ -30,7 +30,7 @@ pub async fn issue_cert(
     State(state): State<AppState>,
     Path(handle): Path<String>,
 ) -> Result<Json<IssueCertResponse>, Response> {
-    use libveritas::sname::SName;
+    use spaces_protocol::sname::SName;
 
     let handle: SName = handle
         .parse()

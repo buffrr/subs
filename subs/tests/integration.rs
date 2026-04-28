@@ -3,7 +3,7 @@
 //! These tests exercise the Operator workflow: add → commit → prove.
 //! Tests use only the Operator interface without accessing LocalSpace internals.
 
-use libveritas::sname::SName;
+use spaces_protocol::sname::SName;
 use spaces_protocol::slabel::SLabel;
 use subs::{HandleRequest, Operator};
 use tempfile::TempDir;
@@ -12,6 +12,7 @@ fn make_request(handle: &str, spk: &[u8]) -> HandleRequest {
     HandleRequest {
         handle: SName::try_from(handle).unwrap(),
         script_pubkey: hex::encode(spk),
+        dev_private_key: None,
     }
 }
 

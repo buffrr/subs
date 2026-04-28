@@ -14,15 +14,16 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use libveritas::sname::SName;
-use libveritas::RootAnchor;
 use libveritas::cert::Certificate;
 use serde::{Serialize, Deserialize};
-use spaces_client::rpc::{DelegateParams, RpcClient, RpcWalletRequest, RpcWalletTxBuilder};
+use spaces_client::rpc::{OperateParams, RpcClient, RpcWalletRequest, RpcWalletTxBuilder};
 use spaces_client::wallets::WalletResponse;
+use spaces_nums::RootAnchor;
 use spaces_protocol::bitcoin::FeeRate;
 use spaces_protocol::slabel::SLabel;
+use spaces_protocol::sname::SName;
 use spaces_testutil::TestRig;
+use spaces_wallet::Subject;
 use spaces_wallet::export::WalletExport;
 use subs::{HandleRequest, Operator};
 use tempfile::TempDir;
@@ -141,7 +142,7 @@ async fn get_wallet_space(rig: &TestRig, wallet: &str, index: usize) -> SLabel {
 
 async fn delegate_space(rig: &TestRig, wallet: &str, space: &SLabel) {
     let res = wallet_send(rig, wallet, vec![
-        RpcWalletRequest::Delegate(DelegateParams { space: space.clone() })
+        RpcWalletRequest::Operate(OperateParams { subject: Subject::Label(space.clone()) })
     ]).await;
     check_wallet_response(&res);
     mine_and_sync(rig, 36).await;
@@ -190,6 +191,7 @@ fn make_request(handle: &str, spk: &[u8]) -> HandleRequest {
     HandleRequest {
         handle: test_sname(handle),
         script_pubkey: hex::encode(spk),
+        dev_private_key: None,
     }
 }
 

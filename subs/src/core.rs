@@ -13,7 +13,7 @@ use anyhow::anyhow;
 use bitcoin::ScriptBuf;
 use libveritas::cert::{Certificate, HandleOut, HandleSubtree, Signature, Witness};
 use libveritas::constants::{FOLD_ID, STEP_ID};
-use libveritas::sname::{Label, NameLike, SName};
+use spaces_protocol::sname::{NameLike, SName, Subname};
 use libveritas_zk::guest::Commitment as ZkCommitment;
 use libveritas_zk::BatchReader;
 use risc0_zkvm::Receipt;
@@ -122,6 +122,19 @@ pub struct SpaceCompressResult {
     pub skipped_reason: Option<String>,
 }
 
+/// Warning about an untracked on-chain commitment.
+#[derive(Debug, Clone, Serialize)]
+pub struct HealthWarning {
+    pub message: String,
+    pub chain_root: String,
+    pub block_height: u32,
+    pub commit_txid: Option<String>,
+    /// True if the commitment can still be rolled back (not yet finalized).
+    pub can_rollback: bool,
+    /// Blocks remaining until the commitment is finalized (0 if already finalized).
+    pub blocks_until_finalized: u32,
+}
+
 /// Status of a space
 #[derive(Debug, Clone, Serialize)]
 pub struct SpaceStatus {
@@ -134,6 +147,8 @@ pub struct SpaceStatus {
     pub pending_proofs: usize,
     pub has_receipt: bool,
     pub has_groth16: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health_warning: Option<HealthWarning>,
 }
 
 /// Result of status query
@@ -268,6 +283,7 @@ impl LocalSpace {
             pending_proofs,
             has_receipt: self.storage.get_tip_receipt_id().await?.is_some(),
             has_groth16: self.storage.get_tip_groth16_id().await?.is_some(),
+            health_warning: None,
         })
     }
 
@@ -326,7 +342,7 @@ impl LocalSpace {
         }
 
         self.storage
-            .add_handle(&handle_name, &script_pubkey)
+            .add_handle(&handle_name, &script_pubkey, request.dev_private_key.as_deref())
             .await?;
         Ok(None)
     }
@@ -340,7 +356,7 @@ impl LocalSpace {
 
         let mut batch = Batch::new(self.name.clone());
         for handle in staged_handles {
-            let sub_label = Label::from_str(&handle.name)
+            let sub_label = Subname::from_str(&handle.name)
                 .map_err(|e| anyhow!("invalid handle name '{}': {}", handle.name, e))?;
             batch.entries.push(BatchEntry {
                 sub_label,
@@ -559,7 +575,7 @@ impl LocalSpace {
     }
 
     /// Look up a handle in SpaceDB
-    pub async fn lookup_handle_in_tree(&self, sub_label: &Label, tip: Option<[u8;32]>) -> anyhow::Result<Option<Vec<u8>>> {
+    pub async fn lookup_handle_in_tree(&self, sub_label: &Subname, tip: Option<[u8;32]>) -> anyhow::Result<Option<Vec<u8>>> {
         let tip = match tip {
             None => return Ok(None),
             Some(t) => t,
@@ -587,12 +603,12 @@ impl LocalSpace {
     }
 
     /// Get staged script pubkey for a handle
-    pub async fn get_staged(&self, sub_label: &Label) -> anyhow::Result<Option<Vec<u8>>> {
+    pub async fn get_staged(&self, sub_label: &Subname) -> anyhow::Result<Option<Vec<u8>>> {
         let handle_name = sub_label.to_string();
         self.storage.is_staged(&handle_name).await
     }
 
-    pub async fn get_handle_spk(&self, sub_label: &Label) -> anyhow::Result<Option<ScriptBuf>> {
+    pub async fn get_handle_spk(&self, sub_label: &Subname) -> anyhow::Result<Option<ScriptBuf>> {
         let handle_name = sub_label.to_string();
         self.storage.get_handle_spk(&handle_name).await
     }
@@ -1037,8 +1053,8 @@ mod tests {
         SLabel::try_from("@example").unwrap()
     }
 
-    fn test_label(name: &str) -> Label {
-        Label::from_str(name).unwrap()
+    fn test_label(name: &str) -> Subname {
+        Subname::from_str(name).unwrap()
     }
 
     fn test_script_pubkey() -> ScriptBuf {
@@ -1049,6 +1065,7 @@ mod tests {
         HandleRequest {
             handle: SName::try_from(handle).unwrap(),
             script_pubkey: hex::encode(spk),
+            dev_private_key: None,
         }
     }
 
@@ -1065,11 +1082,7 @@ mod tests {
         });
 
         let zk_input = batch.to_zk_input();
-
-        // First 32 bytes should be sha256(space)
-        let space_hash = Sha256Hasher::hash(space.as_ref());
-        assert_eq!(&zk_input[0..32], &space_hash);
-
+        
         // Next 32 bytes should be sha256(subspace label)
         let subspace_hash = Sha256Hasher::hash(label.as_slabel().as_ref());
         assert_eq!(&zk_input[32..64], &subspace_hash);
@@ -1124,7 +1137,7 @@ mod tests {
         let handle_name = "alice@testspace";
         let spk = test_script_pubkey();
         storage
-            .add_handle(handle_name, spk.as_bytes())
+            .add_handle(handle_name, spk.as_bytes(), None)
             .await
             .unwrap();
 
