@@ -33,76 +33,56 @@ struct PendingHandle {
     script_pubkey: String,
 }
 
-/// POST /registry/sync - Pull pending handles from registry and stage them
+/// Outcome of a single pull -> stage -> ack cycle.
+pub struct SyncOutcome {
+    pub pulled: usize,
+    pub staged: usize,
+    pub errors: Vec<String>,
+}
+
+/// Pull pending handles from the registry, stage them, and acknowledge.
 ///
-/// Only works when registry_endpoint is configured in settings.
-pub async fn sync_from_registry(State(state): State<AppState>) -> Result<Json<SyncResponse>, impl IntoResponse> {
-    // Check if registry endpoint is configured
-    let registry_endpoint = match state.config.registry_endpoint() {
-        Ok(Some(url)) => url,
-        Ok(None) => {
-            return Err(json_error(
-                StatusCode::BAD_REQUEST,
-                "registry_endpoint not configured. Set it in Settings.",
-            ));
-        }
-        Err(e) => {
-            return Err(json_error(StatusCode::INTERNAL_SERVER_ERROR, e));
-        }
-    };
+/// Shared by `POST /registry/sync` and the background loop, so the caller
+/// decides what a missing endpoint means (400 for the route, skip for the
+/// loop) rather than this deciding for them.
+pub async fn sync_once(state: &AppState, registry_endpoint: &str) -> anyhow::Result<SyncOutcome> {
+    let base = registry_endpoint.trim_end_matches('/');
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .unwrap();
+        .build()?;
 
-    // Fetch pending handles from registry
-    let pending_url = format!("{}/pending", registry_endpoint.trim_end_matches('/'));
-    let response = match client.get(&pending_url).send().await {
-        Ok(r) => r,
-        Err(e) => {
-            return Err(json_error(
-                StatusCode::BAD_GATEWAY,
-                format!("Failed to connect to registry: {}", e),
-            ));
-        }
-    };
+    let pending_url = format!("{}/pending", base);
+    let response = client
+        .get(&pending_url)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to connect to registry: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(json_error(
-            StatusCode::BAD_GATEWAY,
-            format!("Registry returned status: {}", response.status()),
-        ));
+        anyhow::bail!("registry returned status: {}", response.status());
     }
 
-    let pending: RegistryPendingResponse = match response.json().await {
-        Ok(p) => p,
-        Err(e) => {
-            return Err(json_error(
-                StatusCode::BAD_GATEWAY,
-                format!("Invalid response from registry: {}", e),
-            ));
-        }
-    };
+    let pending: RegistryPendingResponse = response
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("invalid response from registry: {}", e))?;
 
     if pending.handles.is_empty() {
-        return Ok(Json(SyncResponse {
-            success: true,
+        return Ok(SyncOutcome {
             pulled: 0,
             staged: 0,
             errors: vec![],
-        }));
+        });
     }
 
     tracing::info!("Pulled {} pending handles from registry", pending.handles.len());
 
-    // Build handle requests
     let mut requests = Vec::new();
     let mut errors = Vec::new();
-    let mut staged_handles = Vec::new();
+    let mut pulled_handles = Vec::new();
 
     for handle in &pending.handles {
-        // Parse the handle name
         let handle_name: spaces_protocol::sname::SName = match handle.handle.parse() {
             Ok(h) => h,
             Err(e) => {
@@ -116,10 +96,9 @@ pub async fn sync_from_registry(State(state): State<AppState>) -> Result<Json<Sy
             script_pubkey: handle.script_pubkey.clone(),
             dev_private_key: None,
         });
-        staged_handles.push(handle.handle.clone());
+        pulled_handles.push(handle.handle.clone());
     }
 
-    // Stage all handles at once
     let staged = if !requests.is_empty() {
         match state.operator.add_requests(requests).await {
             Ok(result) => {
@@ -140,30 +119,70 @@ pub async fn sync_from_registry(State(state): State<AppState>) -> Result<Json<Sy
         0
     };
 
-    // Acknowledge the handles we processed (even if already staged)
-    if !staged_handles.is_empty() {
-        let ack_url = format!("{}/ack", registry_endpoint.trim_end_matches('/'));
-
-        #[derive(Serialize)]
-        struct AckRequest {
-            handles: Vec<String>,
-        }
-
-        let ack_req = AckRequest {
-            handles: staged_handles,
-        };
-
-        if let Err(e) = client.post(&ack_url).json(&ack_req).send().await {
+    // Acknowledge everything we pulled, including handles that were already
+    // staged — a failed ack leaves them Pending at the registry, and the next
+    // cycle re-pulls and re-acks them (add_requests dedupes), so this
+    // self-heals as long as we keep acking what we pulled.
+    if !pulled_handles.is_empty() {
+        if let Err(e) = ack(&client, base, &pulled_handles).await {
+            // Not fatal: staging already succeeded locally.
             tracing::warn!("Failed to acknowledge handles to registry: {}", e);
+            errors.push(format!("ack failed: {}", e));
         }
     }
 
-    Ok(Json(SyncResponse {
-        success: errors.is_empty(),
+    Ok(SyncOutcome {
         pulled: pending.handles.len(),
         staged,
         errors,
-    }))
+    })
+}
+
+/// POST /ack, checking the response rather than firing and forgetting.
+async fn ack(client: &reqwest::Client, base: &str, handles: &[String]) -> anyhow::Result<()> {
+    #[derive(Serialize)]
+    struct AckRequest<'a> {
+        handles: &'a [String],
+    }
+
+    let response = client
+        .post(format!("{}/ack", base))
+        .json(&AckRequest { handles })
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        anyhow::bail!("registry returned {}", response.status());
+    }
+    Ok(())
+}
+
+/// POST /registry/sync - Pull pending handles from registry and stage them
+///
+/// Only works when registry_endpoint is configured in settings.
+pub async fn sync_from_registry(State(state): State<AppState>) -> Result<Json<SyncResponse>, impl IntoResponse> {
+    let registry_endpoint = match state.config.registry_endpoint() {
+        Ok(Some(url)) => url,
+        Ok(None) => {
+            return Err(json_error(
+                StatusCode::BAD_REQUEST,
+                "registry_endpoint not configured. Set it in Settings.",
+            ));
+        }
+        Err(e) => {
+            return Err(json_error(StatusCode::INTERNAL_SERVER_ERROR, e));
+        }
+    };
+
+    match sync_once(&state, &registry_endpoint).await {
+        Ok(outcome) => Ok(Json(SyncResponse {
+            success: outcome.errors.is_empty(),
+            pulled: outcome.pulled,
+            staged: outcome.staged,
+            errors: outcome.errors,
+        })),
+        Err(e) => Err(json_error(StatusCode::BAD_GATEWAY, e)),
+    }
 }
 
 #[derive(Deserialize)]

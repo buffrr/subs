@@ -252,6 +252,9 @@ async fn run_server_inner(state: AppState, port: u16) -> Result<()> {
     // Start background proving loop
     background::spawn_proving_loop(state.clone());
 
+    // Start background registry loop (idles unless auto-sync is enabled)
+    background::spawn_registry_loop(state.clone());
+
     // Build router
     let app = routes::router()
         .layer(TraceLayer::new_for_http())

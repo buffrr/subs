@@ -74,6 +74,16 @@
                         <button onclick="syncFromRegistry()" id="sync-btn" class="btn-primary">Sync Now</button>
                     </div>
                 </div>
+                <div class="flex items-center justify-between" style="margin-top:14px">
+                    <div>
+                        <div style="font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text-primary)">Automatic Sync</div>
+                        <div style="font-family:var(--mono);font-size:11px;color:var(--text-muted)">Continuously pull, stage, acknowledge and publish certificates</div>
+                    </div>
+                    <label class="flex items-center gap-2" style="font-family:var(--mono);font-size:12px;cursor:pointer">
+                        <input type="checkbox" id="registry-auto-sync" onchange="saveAutoSync()">
+                        <span id="auto-sync-label" style="color:var(--text-muted)">Off</span>
+                    </label>
+                </div>
             </div>
         </div>
     </div>
@@ -130,8 +140,38 @@ async function loadConfig() {
         document.getElementById('registry-endpoint').value = config.registry_endpoint || '';
         document.getElementById('current-prover').textContent = config.prover_endpoint || '(not set)';
         document.getElementById('current-registry').textContent = config.registry_endpoint || '(not set)';
+        renderAutoSync(config.registry_auto_sync);
         updateSync(config.registry_endpoint);
     } catch (e) {}
+}
+
+function renderAutoSync(enabled) {
+    document.getElementById('registry-auto-sync').checked = !!enabled;
+    const label = document.getElementById('auto-sync-label');
+    label.textContent = enabled ? 'On' : 'Off';
+    label.style.color = enabled ? 'var(--text-primary)' : 'var(--text-muted)';
+}
+
+async function saveAutoSync() {
+    const enabled = document.getElementById('registry-auto-sync').checked;
+    try {
+        const r = await fetch('/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ registry_auto_sync: enabled })
+        });
+        const j = await r.json();
+        if (j.success) {
+            renderAutoSync(j.registry_auto_sync);
+            showStatus('registry-status', enabled ? 'Automatic sync enabled' : 'Automatic sync disabled', true);
+        } else {
+            renderAutoSync(!enabled);
+            showStatus('registry-status', 'Failed', false);
+        }
+    } catch (e) {
+        renderAutoSync(!enabled);
+        showStatus('registry-status', e.message, false);
+    }
 }
 
 /* --- Prover --- */

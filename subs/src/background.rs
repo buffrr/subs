@@ -1,17 +1,28 @@
 //! Background tasks for subsd.
 //!
 //! Runs a proving loop that fetches estimates for pending proving requests
-//! and polls user-initiated prover jobs for completion.
+//! and polls user-initiated prover jobs for completion, plus an optional
+//! registry loop that pulls, stages, acknowledges and publishes.
 
 use std::time::Duration;
 use spaces_protocol::slabel::SLabel;
 use crate::state::AppState;
+use crate::routes::commits::PUBLISH_BATCH_SIZE;
+use crate::routes::registry::sync_once;
 
 /// Interval between proving loop iterations when no work is found.
 const POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Interval between polls when waiting for a prover job to complete.
 const JOB_POLL_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Interval between registry loop iterations when there's nothing to do.
+const REGISTRY_IDLE_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Interval used while there are still certificates left to publish. Each
+/// publish is one POST to the relay's /message, so even the busy cadence
+/// stays well inside its per-IP budget.
+const REGISTRY_WORK_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Start the background proving loop.
 ///
@@ -21,6 +32,86 @@ pub fn spawn_proving_loop(state: AppState) {
     tokio::spawn(async move {
         proving_loop(state).await;
     });
+}
+
+/// Start the background registry loop.
+///
+/// Drives the full pull -> stage -> ack -> publish cycle. Idles unless
+/// `registry_auto_sync` is enabled and an endpoint is configured, so the
+/// task is always spawned and the toggle takes effect without a restart.
+pub fn spawn_registry_loop(state: AppState) {
+    tokio::spawn(async move {
+        registry_loop(state).await;
+    });
+}
+
+async fn registry_loop(state: AppState) {
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    loop {
+        let enabled = state.config.registry_auto_sync().unwrap_or(false);
+        let endpoint = state.config.registry_endpoint().ok().flatten();
+
+        let (Some(endpoint), true) = (endpoint, enabled) else {
+            tokio::time::sleep(REGISTRY_IDLE_INTERVAL).await;
+            continue;
+        };
+
+        match sync_once(&state, &endpoint).await {
+            Ok(outcome) => {
+                if outcome.pulled > 0 {
+                    tracing::info!(
+                        "Registry sync: pulled {}, staged {}",
+                        outcome.pulled,
+                        outcome.staged
+                    );
+                }
+                for err in &outcome.errors {
+                    tracing::warn!("Registry sync: {}", err);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Registry sync failed: {}", e);
+            }
+        }
+
+        // Publish one batch per space per iteration. Spreading batches across
+        // iterations keeps the relay request rate low and lets a sync that
+        // staged a lot of handles drain over several passes.
+        let mut more_to_publish = false;
+        for space in &state.operator.list_spaces() {
+            match state
+                .operator
+                .publish_certs(space, PUBLISH_BATCH_SIZE, &[])
+                .await
+            {
+                Ok((0, 0)) => {}
+                Ok((published, remaining)) => {
+                    tracing::info!(
+                        "[{}] Published {} cert(s), {} remaining",
+                        space,
+                        published,
+                        remaining
+                    );
+                    if remaining > 0 {
+                        more_to_publish = true;
+                    }
+                }
+                Err(e) => {
+                    // Includes the case where fabric isn't configured, which
+                    // is a permanent condition rather than a transient error.
+                    tracing::debug!("[{}] Publish skipped: {}", space, e);
+                }
+            }
+        }
+
+        let interval = if more_to_publish {
+            REGISTRY_WORK_INTERVAL
+        } else {
+            REGISTRY_IDLE_INTERVAL
+        };
+        tokio::time::sleep(interval).await;
+    }
 }
 
 async fn proving_loop(state: AppState) {

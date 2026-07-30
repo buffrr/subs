@@ -193,7 +193,7 @@ pub async fn get_commit_status(
 }
 
 /// Maximum handles to publish per request to avoid oversized relay messages.
-const PUBLISH_BATCH_SIZE: usize = 100;
+pub(crate) const PUBLISH_BATCH_SIZE: usize = 100;
 
 #[derive(Serialize)]
 pub struct PublishResponse {

@@ -32,6 +32,8 @@ pub struct ConfigResponse {
     /// returned so it doesn't leak via the UI / API.
     pub prover_auth_token_set: bool,
     pub registry_endpoint: Option<String>,
+    /// Whether the background loop pulls from the registry and publishes.
+    pub registry_auto_sync: bool,
 }
 
 #[derive(Deserialize)]
@@ -41,6 +43,9 @@ pub struct SetConfigRequest {
     #[serde(default)]
     pub prover_auth_token: Option<String>,
     pub registry_endpoint: Option<String>,
+    /// `None` leaves the auto-sync setting unchanged.
+    #[serde(default)]
+    pub registry_auto_sync: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -49,6 +54,7 @@ pub struct SetConfigResponse {
     pub prover_endpoint: Option<String>,
     pub prover_auth_token_set: bool,
     pub registry_endpoint: Option<String>,
+    pub registry_auto_sync: bool,
 }
 
 /// GET /config - Get current configuration
@@ -82,10 +88,13 @@ pub async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
         }
     };
 
+    let registry_auto_sync = state.config.registry_auto_sync().unwrap_or(false);
+
     Json(ConfigResponse {
         prover_endpoint,
         prover_auth_token_set,
         registry_endpoint,
+        registry_auto_sync,
     })
     .into_response()
 }
@@ -156,6 +165,17 @@ pub async fn set_config(
         }
     }
 
+    // Set auto-sync if provided
+    if let Some(enabled) = req.registry_auto_sync {
+        if let Err(e) = state.config.set_registry_auto_sync(enabled) {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response();
+        }
+    }
+
     // Return current config
     let prover_endpoint = state.config.prover_endpoint().ok().flatten();
     let prover_auth_token_set = state
@@ -165,12 +185,14 @@ pub async fn set_config(
         .flatten()
         .is_some_and(|s| !s.is_empty());
     let registry_endpoint = state.config.registry_endpoint().ok().flatten();
+    let registry_auto_sync = state.config.registry_auto_sync().unwrap_or(false);
 
     Json(SetConfigResponse {
         success: true,
         prover_endpoint,
         prover_auth_token_set,
         registry_endpoint,
+        registry_auto_sync,
     })
     .into_response()
 }
