@@ -9,18 +9,18 @@ subs-prover = { path = "prover" }
 subs-core = { path = "core" }
 
 # libveritas / fabric / spacedb / relay
-libveritas = { version = "=0.1.2", features = ["elf"] }
+libveritas = { version = "=0.3.3", features = ["elf"] }
 libveritas_zk = "=0.1.1"
-libveritas_testutil = "=0.1.2"
+libveritas_testutil = "=0.3.3"
 spacedb = "0.1"
 relay = { git = "https://github.com/spacesprotocol/certrelay.git" }
-fabric = { package = "fabric-resolver", version = "=0.1.2" }
+fabric = { package = "fabric-resolver", version = "=0.2.6" }
 
 # Spaces protocol crates
-spaces_protocol = { version = "0.1", features = ["std"] }
-spaces_nums = { version = "0.1", features = ["std"] }
-spaces_client = { version = "0.1" }
-spaces_wallet = "0.1"
+spaces_protocol = { version = "0.2.1", features = ["std"] }
+spaces_nums = { version = "0.2.1", features = ["std"] }
+spaces_client = { version = "0.2.1" }
+spaces_wallet = "0.2.1"
 spaces_testutil = { git = "https://github.com/spacesprotocol/spaces.git", branch = "subspaces" }
 
 # Common third-party deps
