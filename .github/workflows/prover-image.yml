@@ -1,0 +1,112 @@
+name: prover-image
+
+# Builds the CUDA-enabled subs-prover GPU image.
+#
+# Forks build but do not push: GITHUB_TOKEN is scoped to the repository owner,
+# so only a run inside spacesprotocol/subs can publish to that org's registry.
+# A fork's run still compiles the image, which is the part worth catching in CI.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'prover/**'
+      - 'types/**'
+      - 'core/**'
+      - 'Cargo.toml'
+      - 'rust-toolchain.toml'
+      - '.dockerignore'
+      - '.github/workflows/prover-image.yml'
+  workflow_dispatch:
+    inputs:
+      risc0_version:
+        description: 'risc0 toolchain version to pin (empty = latest)'
+        required: false
+        default: ''
+
+env:
+  IMAGE: ghcr.io/spacesprotocol/subs-prover-gpu
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Decide whether this run can publish
+        id: gate
+        run: |
+          if [ "${{ github.repository }}" = "spacesprotocol/subs" ] \
+             && [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Build-only run (fork or pull request); image will not be pushed."
+          fi
+
+      # The CUDA devel image plus a full risc0 release build overruns the
+      # ~14 GB free on a stock runner. Reclaiming preinstalled toolchains we
+      # don't use buys roughly 25 GB.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force
+          df -h /
+
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: steps.gate.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: prover/Dockerfile
+          platforms: linux/amd64
+          push: ${{ steps.gate.outputs.push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            RISC0_VERSION=${{ inputs.risc0_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### subs-prover GPU image"
+            echo
+            if [ "${{ steps.gate.outputs.push }}" = "true" ]; then
+              echo "Pushed:"
+            else
+              echo "Built but **not** pushed (fork or pull request):"
+            fi
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

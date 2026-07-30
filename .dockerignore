@@ -1,0 +1,23 @@
+# The prover image builds from the repo root, so keep the context small —
+# everything here is either rebuilt inside the image or irrelevant to it.
+.git
+.github
+.idea
+.claude
+.vscode
+target
+**/target
+
+# Local operator state, never part of an image.
+data
+testrig-data
+*.bin
+*.priv
+*.subs
+*.subs.c
+*.sdb
+
+.DS_Store
+**/.DS_Store
+screenshot.png
+LICENSE
