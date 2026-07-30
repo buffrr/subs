@@ -204,6 +204,7 @@ pub async fn push_to_prover(
                 "prover_endpoint not configured. Set it via POST /config",
             )
         })?;
+    let prover_auth_token = state.config.prover_auth_token().ok().flatten();
 
     // Get the next proving request
     let request = state
@@ -228,10 +229,14 @@ pub async fn push_to_prover(
     let client = reqwest::Client::new();
     let prove_url = format!("{}/prove", prover_endpoint.trim_end_matches('/'));
 
-    let response = client
+    let mut req = client
         .post(&prove_url)
         .header("Content-Type", "application/octet-stream")
-        .body(request_bytes)
+        .body(request_bytes);
+    if let Some(t) = &prover_auth_token {
+        req = req.bearer_auth(t);
+    }
+    let response = req
         .send()
         .await
         .map_err(|e| json_error(StatusCode::BAD_GATEWAY, format!("prover request failed: {}", e)))?;
@@ -303,6 +308,7 @@ pub async fn poll_prover(
                 "prover_endpoint not configured",
             )
         })?;
+    let prover_auth_token = state.config.prover_auth_token().ok().flatten();
 
     // Get the next proving request to know what we're looking for
     let request = state
@@ -343,8 +349,11 @@ pub async fn poll_prover(
     let client = reqwest::Client::new();
     let status_url = format!("{}/jobs/{}", prover_endpoint.trim_end_matches('/'), job_id);
 
-    let response = client
-        .get(&status_url)
+    let mut req = client.get(&status_url);
+    if let Some(t) = &prover_auth_token {
+        req = req.bearer_auth(t);
+    }
+    let response = req
         .send()
         .await
         .map_err(|e| json_error(StatusCode::BAD_GATEWAY, format!("prover request failed: {}", e)))?;
@@ -373,8 +382,11 @@ pub async fn poll_prover(
         "complete" => {
             // Download the receipt
             let receipt_url = format!("{}/jobs/{}/receipt", prover_endpoint.trim_end_matches('/'), job_id);
-            let receipt_response = client
-                .get(&receipt_url)
+            let mut req = client.get(&receipt_url);
+            if let Some(t) = &prover_auth_token {
+                req = req.bearer_auth(t);
+            }
+            let receipt_response = req
                 .send()
                 .await
                 .map_err(|e| json_error(StatusCode::BAD_GATEWAY, format!("receipt download failed: {}", e)))?;
@@ -444,6 +456,7 @@ pub async fn get_estimate(
         .prover_endpoint()
         .map_err(|e| json_error(StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| json_error(StatusCode::BAD_REQUEST, "prover_endpoint not configured"))?;
+    let prover_auth_token = state.config.prover_auth_token().ok().flatten();
 
     let request = state
         .operator
@@ -461,10 +474,14 @@ pub async fn get_estimate(
     let client = reqwest::Client::new();
     let url = format!("{}/estimate", prover_endpoint.trim_end_matches('/'));
 
-    let response = client
+    let mut req = client
         .post(&url)
         .header("Content-Type", "application/octet-stream")
-        .body(request_bytes)
+        .body(request_bytes);
+    if let Some(t) = &prover_auth_token {
+        req = req.bearer_auth(t);
+    }
+    let response = req
         .send()
         .await
         .map_err(|e| json_error(StatusCode::BAD_GATEWAY, format!("prover request failed: {}", e)))?;

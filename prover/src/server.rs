@@ -8,9 +8,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Request, State},
     http::StatusCode,
-    response::IntoResponse,
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -146,14 +147,29 @@ pub async fn run_server(port: u16) -> anyhow::Result<()> {
         run_worker(worker_state, rx).await;
     });
 
-    // Build router
-    let app = Router::new()
+    // Optional bearer-token auth. If PROVER_AUTH_TOKEN is set, every route
+    // (including /health) requires `Authorization: Bearer <token>` — that
+    // way a successful /health probe also confirms auth is wired correctly.
+    let auth_token = std::env::var("PROVER_AUTH_TOKEN").ok().filter(|s| !s.is_empty());
+    if auth_token.is_some() {
+        tracing::info!("PROVER_AUTH_TOKEN set, requiring bearer auth on all routes");
+    }
+
+    let mut app = Router::new()
         .route("/health", get(health))
         .route("/prove", post(submit_prove))
         .route("/estimate", post(submit_estimate))
         .route("/compress", post(submit_compress))
         .route("/jobs/:job_id", get(get_job_status))
-        .route("/jobs/:job_id/receipt", get(get_job_receipt))
+        .route("/jobs/:job_id/receipt", get(get_job_receipt));
+    if let Some(token) = auth_token {
+        app = app.layer(middleware::from_fn(move |req: Request, next: Next| {
+            let token = token.clone();
+            async move { bearer_auth(token, req, next).await }
+        }));
+    }
+
+    let app = app
         .layer(TraceLayer::new_for_http())
         .layer(
             CorsLayer::new()
@@ -178,6 +194,20 @@ pub async fn run_server(port: u16) -> anyhow::Result<()> {
 /// Health check endpoint
 async fn health() -> &'static str {
     "ok"
+}
+
+/// Bearer-token middleware. Compares against the configured token in
+/// constant time-ish. Used only for the protected route group.
+async fn bearer_auth(expected: String, req: Request, next: Next) -> Response {
+    let presented = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "));
+    match presented {
+        Some(t) if t == expected => next.run(req).await,
+        _ => (StatusCode::UNAUTHORIZED, "missing or bad bearer token").into_response(),
+    }
 }
 
 /// Submit a proving request (binary borsh-encoded ProvingRequest)

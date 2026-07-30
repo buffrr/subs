@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS config (
 
 /// Configuration keys
 pub const KEY_PROVER_ENDPOINT: &str = "prover_endpoint";
+pub const KEY_PROVER_AUTH_TOKEN: &str = "prover_auth_token";
 pub const KEY_REGISTRY_ENDPOINT: &str = "registry_endpoint";
 
 /// Configuration storage backed by SQLite.
@@ -81,6 +82,16 @@ impl ConfigStore {
     /// Set the prover endpoint URL.
     pub fn set_prover_endpoint(&self, url: &str) -> Result<()> {
         self.set(KEY_PROVER_ENDPOINT, url)
+    }
+
+    /// Get the optional bearer token to send with prover requests.
+    pub fn prover_auth_token(&self) -> Result<Option<String>> {
+        self.get(KEY_PROVER_AUTH_TOKEN)
+    }
+
+    /// Set the bearer token used for prover requests.
+    pub fn set_prover_auth_token(&self, token: &str) -> Result<()> {
+        self.set(KEY_PROVER_AUTH_TOKEN, token)
     }
 
     /// Get the registry endpoint URL.

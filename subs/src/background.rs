@@ -35,6 +35,7 @@ async fn proving_loop(state: AppState) {
                 continue;
             }
         };
+        let prover_auth_token = state.config.prover_auth_token().ok().flatten();
 
         let spaces = state.operator.list_spaces();
         let mut did_work = false;
@@ -61,7 +62,7 @@ async fn proving_loop(state: AppState) {
 
             if let Some(job_id) = existing_job {
                 // Poll existing in-flight jobs to completion
-                match poll_job(&state, &prover_endpoint, space, &job_key, &job_id, commitment_id, is_fold).await {
+                match poll_job(&state, &prover_endpoint, prover_auth_token.as_deref(), space, &job_key, &job_id, commitment_id, is_fold).await {
                     Ok(true) => {
                         tracing::info!("[{}] Proof complete for commitment {}", space, commitment_id);
                     }
@@ -72,7 +73,7 @@ async fn proving_loop(state: AppState) {
                 }
             } else {
                 // Only fetch and store the estimate; proving is user-initiated via the UI
-                if let Err(e) = fetch_and_store_estimate(&state, &prover_endpoint, space, commitment_id, &request).await {
+                if let Err(e) = fetch_and_store_estimate(&state, &prover_endpoint, prover_auth_token.as_deref(), space, commitment_id, &request).await {
                     tracing::debug!("[{}] Could not fetch estimate: {}", space, e);
                 }
             }
@@ -87,6 +88,7 @@ async fn proving_loop(state: AppState) {
 async fn fetch_and_store_estimate(
     state: &AppState,
     prover_endpoint: &str,
+    prover_auth_token: Option<&str>,
     space: &SLabel,
     commitment_id: i64,
     request: &subs_types::ProvingRequest,
@@ -95,13 +97,15 @@ async fn fetch_and_store_estimate(
     let client = reqwest::Client::new();
     let url = format!("{}/estimate", prover_endpoint.trim_end_matches('/'));
 
-    let response = client
+    let mut req = client
         .post(&url)
         .header("Content-Type", "application/octet-stream")
         .body(request_bytes)
-        .timeout(std::time::Duration::from_secs(120))
-        .send()
-        .await?;
+        .timeout(std::time::Duration::from_secs(120));
+    if let Some(t) = prover_auth_token {
+        req = req.bearer_auth(t);
+    }
+    let response = req.send().await?;
 
     if !response.status().is_success() {
         anyhow::bail!("prover returned {}", response.status());
@@ -117,6 +121,7 @@ async fn fetch_and_store_estimate(
 async fn poll_job(
     state: &AppState,
     prover_endpoint: &str,
+    prover_auth_token: Option<&str>,
     space: &SLabel,
     job_key: &str,
     job_id: &str,
@@ -126,7 +131,11 @@ async fn poll_job(
     let client = reqwest::Client::new();
     let url = format!("{}/jobs/{}", prover_endpoint.trim_end_matches('/'), job_id);
 
-    let response = client.get(&url).send().await?;
+    let mut req = client.get(&url);
+    if let Some(t) = prover_auth_token {
+        req = req.bearer_auth(t);
+    }
+    let response = req.send().await?;
 
     if !response.status().is_success() {
         if response.status() == reqwest::StatusCode::NOT_FOUND {
@@ -148,7 +157,11 @@ async fn poll_job(
     match job.status.as_str() {
         "complete" => {
             let receipt_url = format!("{}/jobs/{}/receipt", prover_endpoint.trim_end_matches('/'), job_id);
-            let receipt_response = client.get(&receipt_url).send().await?;
+            let mut req = client.get(&receipt_url);
+            if let Some(t) = prover_auth_token {
+                req = req.bearer_auth(t);
+            }
+            let receipt_response = req.send().await?;
 
             if !receipt_response.status().is_success() {
                 anyhow::bail!("receipt download failed: {}", receipt_response.status());

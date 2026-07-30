@@ -21,16 +21,21 @@
                 </div>
             </div>
         </div>
-        <div class="section-body">
-            <div class="flex items-end gap-3">
-                <div class="flex-1">
-                    <label for="prover-endpoint" class="form-label">Endpoint</label>
-                    <input type="text" id="prover-endpoint" placeholder="http://localhost:7778" class="input-field w-full">
-                </div>
+        <div class="section-body" style="display:flex;flex-direction:column;gap:12px">
+            <div>
+                <label for="prover-endpoint" class="form-label">Endpoint</label>
+                <input type="text" id="prover-endpoint" placeholder="http://localhost:7778" class="input-field w-full">
+            </div>
+            <div>
+                <label for="prover-auth-token" class="form-label">Auth Token <span style="color:var(--text-muted);font-weight:normal">(optional)</span></label>
+                <input type="password" id="prover-auth-token" placeholder="(leave blank to keep current)" class="input-field w-full" autocomplete="off">
+                <div id="prover-token-hint" style="margin-top:6px;font-size:11px;color:var(--text-muted)"></div>
+            </div>
+            <div class="flex items-center gap-3">
                 <button onclick="testProver()" class="btn-secondary">Test</button>
                 <button onclick="saveProver()" class="btn-primary">Save</button>
             </div>
-            <div id="prover-status" class="hidden" style="margin-top:10px"></div>
+            <div id="prover-status" class="hidden"></div>
         </div>
     </div>
 
@@ -106,11 +111,22 @@ function updateSync(endpoint) {
 
 /* --- Load config --- */
 
+function renderProverTokenHint(isSet) {
+    const el = document.getElementById('prover-token-hint');
+    if (isSet) {
+        el.innerHTML = 'A token is configured. Leave blank to keep it, or type a new one to replace. <a href="#" onclick="event.preventDefault();clearProverToken();" style="color:var(--accent)">Clear</a>';
+    } else {
+        el.textContent = 'No token set.';
+    }
+}
+
 async function loadConfig() {
     try {
         const r = await fetch('/config');
         const config = await r.json();
         document.getElementById('prover-endpoint').value = config.prover_endpoint || '';
+        document.getElementById('prover-auth-token').value = '';
+        renderProverTokenHint(config.prover_auth_token_set);
         document.getElementById('registry-endpoint').value = config.registry_endpoint || '';
         document.getElementById('current-prover').textContent = config.prover_endpoint || '(not set)';
         document.getElementById('current-registry').textContent = config.registry_endpoint || '(not set)';
@@ -124,11 +140,15 @@ async function testProver() {
     const ep = document.getElementById('prover-endpoint').value.trim();
     if (!ep) { showStatus('prover-status', 'Enter URL', false); return; }
     showStatus('prover-status', 'Testing...', true);
+    // If the user typed a token, test with it; otherwise let the server fall
+    // back to the stored one. (null = use stored, "" = test without auth.)
+    const tokField = document.getElementById('prover-auth-token').value;
+    const auth_token = tokField === '' ? null : tokField;
     try {
         const r = await fetch('/config/test/prover', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ endpoint: ep })
+            body: JSON.stringify({ endpoint: ep, auth_token })
         });
         const j = await r.json();
         showStatus('prover-status', j.success ? 'Connected' : (j.error || 'Failed'), j.success);
@@ -139,18 +159,46 @@ async function testProver() {
 
 async function saveProver() {
     const ep = document.getElementById('prover-endpoint').value.trim();
+    const tokField = document.getElementById('prover-auth-token').value;
+    // Only send the token field when the user actually typed something. The
+    // server treats `null` as unchanged, `""` as clear, non-empty as set.
+    const body = { prover_endpoint: ep || null };
+    if (tokField !== '') {
+        body.prover_auth_token = tokField;
+    }
     try {
         const r = await fetch('/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prover_endpoint: ep || null })
+            body: JSON.stringify(body)
         });
         const j = await r.json();
         if (j.success) {
             showStatus('prover-status', 'Saved', true);
             document.getElementById('current-prover').textContent = ep || '(not set)';
+            document.getElementById('prover-auth-token').value = '';
+            renderProverTokenHint(j.prover_auth_token_set);
         } else {
             showStatus('prover-status', 'Failed', false);
+        }
+    } catch (e) {
+        showStatus('prover-status', e.message, false);
+    }
+}
+
+async function clearProverToken() {
+    if (!confirm('Clear the prover auth token?')) return;
+    try {
+        const r = await fetch('/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prover_auth_token: '' })
+        });
+        const j = await r.json();
+        if (j.success) {
+            showStatus('prover-status', 'Token cleared', true);
+            document.getElementById('prover-auth-token').value = '';
+            renderProverTokenHint(false);
         }
     } catch (e) {
         showStatus('prover-status', e.message, false);
