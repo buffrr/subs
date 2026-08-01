@@ -14,7 +14,7 @@ libveritas_zk = "=0.1.1"
 libveritas_testutil = "=0.3.3"
 spacedb = "0.1"
 relay = { git = "https://github.com/spacesprotocol/certrelay.git" }
-fabric = { package = "fabric-resolver", version = "=0.2.6" }
+fabric = { package = "fabric-resolver", version = "=0.2.7" }
 
 # Spaces protocol crates
 spaces_protocol = { version = "0.2.1", features = ["std"] }

@@ -19,10 +19,25 @@ const JOB_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Interval between registry loop iterations when there's nothing to do.
 const REGISTRY_IDLE_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Interval used while there are still certificates left to publish. Each
-/// publish is one POST to the relay's /message, so even the busy cadence
-/// stays well inside its per-IP budget.
+/// Interval used while there are still certificates left to publish.
 const REGISTRY_WORK_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Minimum gap between two publishes.
+///
+/// The relay's binding limit for us is the per-IP /message bucket: 60 per
+/// minute, counted per message rather than per certificate. Spacing sends
+/// caps us at 40/min however many spaces are being drained — the loop
+/// publishes once per space per iteration, so without this the rate would
+/// scale with space count and could exceed the bucket on its own.
+///
+/// The per-space (100 updates/min) and per-handle (3 per 5 min) content
+/// limits do not apply to this loop as of certrelay 0.2.7: they now charge
+/// only same-or-lower-epoch churn, i.e. cheap off-chain record bumps. A
+/// first publish is free, and a temp-to-final republish rides a new
+/// commitment, which advances the space's epoch_height and is likewise
+/// free. Only republishing a handle at an unchanged commitment is charged,
+/// which publish_certs does not do.
+const MESSAGE_SPACING: Duration = Duration::from_millis(1500);
 
 /// Start the background proving loop.
 ///
@@ -75,11 +90,16 @@ async fn registry_loop(state: AppState) {
             }
         }
 
-        // Publish one batch per space per iteration. Spreading batches across
-        // iterations keeps the relay request rate low and lets a sync that
-        // staged a lot of handles drain over several passes.
+        // Publish one batch per space per iteration, spacing the sends so the
+        // message rate stays inside the relay's per-IP bucket no matter how
+        // many spaces are being drained at once.
         let mut more_to_publish = false;
+        let mut sent_any = false;
         for space in &state.operator.list_spaces() {
+            if sent_any {
+                tokio::time::sleep(MESSAGE_SPACING).await;
+            }
+
             match state
                 .operator
                 .publish_certs(space, PUBLISH_BATCH_SIZE, &[])
@@ -87,6 +107,7 @@ async fn registry_loop(state: AppState) {
             {
                 Ok((0, 0)) => {}
                 Ok((published, remaining)) => {
+                    sent_any = true;
                     tracing::info!(
                         "[{}] Published {} cert(s), {} remaining",
                         space,

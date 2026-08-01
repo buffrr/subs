@@ -2279,9 +2279,9 @@ dependencies = [
 
 [[package]]
 name = "fabric-resolver"
-version = "0.2.6"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41aee73e37f8d11b1804646daa3dfada1ea33d7cb7ad22ab3d3ce1f970f06e1f"
+checksum = "0fa0e6bdf85df8e2cddc911d311dc748251f6aa78adb8e61884bcc73c4851277"
 dependencies = [
  "borsh",
  "dashmap",
@@ -2298,8 +2298,8 @@ dependencies = [
 
 [[package]]
 name = "fabric-resolver"
-version = "0.2.6"
-source = "git+https://github.com/spacesprotocol/certrelay.git#37e8e0b7dc7d77776ddfc0319dac3a93cc1395d8"
+version = "0.2.7"
+source = "git+https://github.com/spacesprotocol/certrelay.git#15234646f27ff9fcee96d6d1aa79e1fce60d4f88"
 dependencies = [
  "borsh",
  "dashmap",
@@ -4917,8 +4917,8 @@ dependencies = [
 
 [[package]]
 name = "relay"
-version = "0.2.6"
-source = "git+https://github.com/spacesprotocol/certrelay.git#37e8e0b7dc7d77776ddfc0319dac3a93cc1395d8"
+version = "0.2.7"
+source = "git+https://github.com/spacesprotocol/certrelay.git#15234646f27ff9fcee96d6d1aa79e1fce60d4f88"
 dependencies = [
  "anyhow",
  "axum 0.8.3",
@@ -4927,7 +4927,7 @@ dependencies = [
  "borsh",
  "clap",
  "env_logger",
- "fabric-resolver 0.2.6 (git+https://github.com/spacesprotocol/certrelay.git)",
+ "fabric-resolver 0.2.7 (git+https://github.com/spacesprotocol/certrelay.git)",
  "governor",
  "hex",
  "libveritas",
@@ -6418,7 +6418,7 @@ dependencies = [
  "bitcoin",
  "borsh",
  "env_logger",
- "fabric-resolver 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "fabric-resolver 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",
  "libveritas",
  "libveritas_zk",
