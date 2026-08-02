@@ -33,6 +33,10 @@ pub struct QueryTemplate;
 pub struct SettingsTemplate;
 
 #[derive(Template)]
+#[template(path = "logs.html")]
+pub struct LogsTemplate;
+
+#[derive(Template)]
 #[template(path = "transactions.html")]
 pub struct TransactionsTemplate;
 
@@ -93,6 +97,12 @@ pub async fn operate_page(State(state): State<AppState>) -> Html<String> {
 /// GET /ui/query - Query page
 pub async fn query_page() -> Html<String> {
     let template = QueryTemplate;
+    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+}
+
+/// GET /ui/logs - Live log tail
+pub async fn logs_page() -> Html<String> {
+    let template = LogsTemplate;
     Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
 }
 

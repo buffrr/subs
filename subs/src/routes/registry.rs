@@ -33,11 +33,186 @@ struct PendingHandle {
     script_pubkey: String,
 }
 
+/// Outcome of a single pull -> stage -> ack cycle.
+pub struct SyncOutcome {
+    pub pulled: usize,
+    pub staged: usize,
+    pub errors: Vec<String>,
+}
+
+/// Pull pending handles from the registry, stage them, and acknowledge.
+///
+/// Shared by `POST /registry/sync` and the background loop, so the caller
+/// decides what a missing endpoint means (400 for the route, skip for the
+/// loop) rather than this deciding for them.
+pub async fn sync_once(
+    state: &AppState,
+    registry_endpoint: &str,
+    auth_token: Option<&str>,
+) -> anyhow::Result<SyncOutcome> {
+    let base = registry_endpoint.trim_end_matches('/');
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
+
+    let mut req = client.get(format!("{}/pending", base));
+    if let Some(t) = auth_token {
+        req = req.bearer_auth(t);
+    }
+    let response = req
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to connect to registry: {}", e))?;
+
+    if let Some(msg) = auth_error(response.status()) {
+        anyhow::bail!(msg);
+    }
+    if !response.status().is_success() {
+        anyhow::bail!("registry returned status: {}", response.status());
+    }
+
+    let pending: RegistryPendingResponse = response
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("invalid response from registry: {}", e))?;
+
+    if pending.handles.is_empty() {
+        return Ok(SyncOutcome {
+            pulled: 0,
+            staged: 0,
+            errors: vec![],
+        });
+    }
+
+    tracing::info!("Pulled {} pending handles from registry", pending.handles.len());
+
+    let mut errors = Vec::new();
+
+    // Group by space before staging. add_requests aborts the whole call if any
+    // one space can't be loaded — an unknown space, a wallet that can't operate
+    // it — so batching every space together lets one bad handle sink handles
+    // that would otherwise stage fine.
+    let mut by_space: std::collections::HashMap<String, Vec<(String, subs_core::HandleRequest)>> =
+        std::collections::HashMap::new();
+
+    for handle in &pending.handles {
+        let handle_name: spaces_protocol::sname::SName = match handle.handle.parse() {
+            Ok(h) => h,
+            Err(e) => {
+                errors.push(format!("{}: invalid handle: {}", handle.handle, e));
+                continue;
+            }
+        };
+
+        let space = match handle_name.space() {
+            Some(s) => s.to_string(),
+            None => {
+                errors.push(format!("{}: handle has no space", handle.handle));
+                continue;
+            }
+        };
+
+        by_space.entry(space).or_default().push((
+            handle.handle.clone(),
+            subs_core::HandleRequest {
+                handle: handle_name,
+                script_pubkey: handle.script_pubkey.clone(),
+                dev_private_key: None,
+            },
+        ));
+    }
+
+    let mut staged = 0;
+    let mut to_ack: Vec<String> = Vec::new();
+
+    for (space, entries) in by_space {
+        let (names, requests): (Vec<String>, Vec<subs_core::HandleRequest>) =
+            entries.into_iter().unzip();
+
+        match state.operator.add_requests(requests).await {
+            Ok(result) => {
+                tracing::info!("[{}] Staged {} handles", space, result.total_added);
+                for space_result in &result.by_space {
+                    for skip in &space_result.skipped {
+                        tracing::info!("Skipped: {} ({:?})", skip.handle, skip.reason);
+                    }
+                }
+                staged += result.total_added;
+                // Skips are settled outcomes (already staged, already
+                // committed, taken by another spk), so they're acked too —
+                // leaving them pending would re-pull them forever.
+                to_ack.extend(names);
+            }
+            Err(e) => {
+                // Deliberately not acked. Staging never happened, so acking
+                // would mark them done at the registry and lose them; leaving
+                // them pending means a fixed operator config picks them up.
+                errors.push(format!("{}: failed to stage: {}", space, e));
+            }
+        }
+    }
+
+    // A failed ack leaves handles Pending at the registry, and the next cycle
+    // re-pulls and re-acks them (add_requests dedupes), so this self-heals.
+    if !to_ack.is_empty() {
+        if let Err(e) = ack(&client, base, auth_token, &to_ack).await {
+            // Not fatal: staging already succeeded locally.
+            tracing::warn!("Failed to acknowledge handles to registry: {}", e);
+            errors.push(format!("ack failed: {}", e));
+        }
+    }
+
+    Ok(SyncOutcome {
+        pulled: pending.handles.len(),
+        staged,
+        errors,
+    })
+}
+
+/// POST /ack, checking the response rather than firing and forgetting.
+async fn ack(
+    client: &reqwest::Client,
+    base: &str,
+    auth_token: Option<&str>,
+    handles: &[String],
+) -> anyhow::Result<()> {
+    #[derive(Serialize)]
+    struct AckRequest<'a> {
+        handles: &'a [String],
+    }
+
+    let mut req = client
+        .post(format!("{}/ack", base))
+        .json(&AckRequest { handles });
+    if let Some(t) = auth_token {
+        req = req.bearer_auth(t);
+    }
+    let response = req.send().await?;
+
+    if let Some(msg) = auth_error(response.status()) {
+        anyhow::bail!(msg);
+    }
+    if !response.status().is_success() {
+        anyhow::bail!("registry returned {}", response.status());
+    }
+    Ok(())
+}
+
+/// Name the likely fix when the registry rejects our credentials, so a bad
+/// token doesn't read like an ordinary upstream failure.
+pub(crate) fn auth_error(status: reqwest::StatusCode) -> Option<String> {
+    matches!(
+        status,
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+    )
+    .then(|| format!("registry rejected our credentials ({}); check the auth token in Settings", status))
+}
+
 /// POST /registry/sync - Pull pending handles from registry and stage them
 ///
 /// Only works when registry_endpoint is configured in settings.
 pub async fn sync_from_registry(State(state): State<AppState>) -> Result<Json<SyncResponse>, impl IntoResponse> {
-    // Check if registry endpoint is configured
     let registry_endpoint = match state.config.registry_endpoint() {
         Ok(Some(url)) => url,
         Ok(None) => {
@@ -51,119 +226,17 @@ pub async fn sync_from_registry(State(state): State<AppState>) -> Result<Json<Sy
         }
     };
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .unwrap();
+    let auth_token = state.config.registry_auth_token().ok().flatten();
 
-    // Fetch pending handles from registry
-    let pending_url = format!("{}/pending", registry_endpoint.trim_end_matches('/'));
-    let response = match client.get(&pending_url).send().await {
-        Ok(r) => r,
-        Err(e) => {
-            return Err(json_error(
-                StatusCode::BAD_GATEWAY,
-                format!("Failed to connect to registry: {}", e),
-            ));
-        }
-    };
-
-    if !response.status().is_success() {
-        return Err(json_error(
-            StatusCode::BAD_GATEWAY,
-            format!("Registry returned status: {}", response.status()),
-        ));
+    match sync_once(&state, &registry_endpoint, auth_token.as_deref()).await {
+        Ok(outcome) => Ok(Json(SyncResponse {
+            success: outcome.errors.is_empty(),
+            pulled: outcome.pulled,
+            staged: outcome.staged,
+            errors: outcome.errors,
+        })),
+        Err(e) => Err(json_error(StatusCode::BAD_GATEWAY, e)),
     }
-
-    let pending: RegistryPendingResponse = match response.json().await {
-        Ok(p) => p,
-        Err(e) => {
-            return Err(json_error(
-                StatusCode::BAD_GATEWAY,
-                format!("Invalid response from registry: {}", e),
-            ));
-        }
-    };
-
-    if pending.handles.is_empty() {
-        return Ok(Json(SyncResponse {
-            success: true,
-            pulled: 0,
-            staged: 0,
-            errors: vec![],
-        }));
-    }
-
-    tracing::info!("Pulled {} pending handles from registry", pending.handles.len());
-
-    // Build handle requests
-    let mut requests = Vec::new();
-    let mut errors = Vec::new();
-    let mut staged_handles = Vec::new();
-
-    for handle in &pending.handles {
-        // Parse the handle name
-        let handle_name: spaces_protocol::sname::SName = match handle.handle.parse() {
-            Ok(h) => h,
-            Err(e) => {
-                errors.push(format!("{}: invalid handle: {}", handle.handle, e));
-                continue;
-            }
-        };
-
-        requests.push(subs_core::HandleRequest {
-            handle: handle_name,
-            script_pubkey: handle.script_pubkey.clone(),
-            dev_private_key: None,
-        });
-        staged_handles.push(handle.handle.clone());
-    }
-
-    // Stage all handles at once
-    let staged = if !requests.is_empty() {
-        match state.operator.add_requests(requests).await {
-            Ok(result) => {
-                tracing::info!("Staged {} handles", result.total_added);
-                for space_result in &result.by_space {
-                    for skip in &space_result.skipped {
-                        tracing::info!("Skipped: {} ({:?})", skip.handle, skip.reason);
-                    }
-                }
-                result.total_added
-            }
-            Err(e) => {
-                errors.push(format!("Failed to stage handles: {}", e));
-                0
-            }
-        }
-    } else {
-        0
-    };
-
-    // Acknowledge the handles we processed (even if already staged)
-    if !staged_handles.is_empty() {
-        let ack_url = format!("{}/ack", registry_endpoint.trim_end_matches('/'));
-
-        #[derive(Serialize)]
-        struct AckRequest {
-            handles: Vec<String>,
-        }
-
-        let ack_req = AckRequest {
-            handles: staged_handles,
-        };
-
-        if let Err(e) = client.post(&ack_url).json(&ack_req).send().await {
-            tracing::warn!("Failed to acknowledge handles to registry: {}", e);
-        }
-    }
-
-    Ok(Json(SyncResponse {
-        success: errors.is_empty(),
-        pulled: pending.handles.len(),
-        staged,
-        errors,
-    }))
 }
 
 #[derive(Deserialize)]
@@ -233,7 +306,7 @@ pub async fn notify_registry(
         .build()
         .unwrap();
 
-    let webhook_url = format!("{}/webhook/committed", registry_endpoint.trim_end_matches('/'));
+    let committed_url = format!("{}/committed", registry_endpoint.trim_end_matches('/'));
 
     #[derive(Serialize)]
     struct WebhookPayload {
@@ -246,7 +319,11 @@ pub async fn notify_registry(
         handles: handle_names.clone(),
     };
 
-    let response = match client.post(&webhook_url).json(&payload).send().await {
+    let mut notify_req = client.post(&committed_url).json(&payload);
+    if let Some(t) = state.config.registry_auth_token().ok().flatten() {
+        notify_req = notify_req.bearer_auth(t);
+    }
+    let response = match notify_req.send().await {
         Ok(r) => r,
         Err(e) => {
             return Err(json_error(
@@ -259,7 +336,7 @@ pub async fn notify_registry(
     if !response.status().is_success() {
         return Err(json_error(
             StatusCode::BAD_GATEWAY,
-            format!("Registry webhook returned: {}", response.status()),
+            format!("Registry /committed returned: {}", response.status()),
         ));
     }
 

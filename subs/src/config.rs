@@ -16,7 +16,10 @@ CREATE TABLE IF NOT EXISTS config (
 
 /// Configuration keys
 pub const KEY_PROVER_ENDPOINT: &str = "prover_endpoint";
+pub const KEY_PROVER_AUTH_TOKEN: &str = "prover_auth_token";
 pub const KEY_REGISTRY_ENDPOINT: &str = "registry_endpoint";
+pub const KEY_REGISTRY_AUTH_TOKEN: &str = "registry_auth_token";
+pub const KEY_REGISTRY_AUTO_SYNC: &str = "registry_auto_sync";
 
 /// Configuration storage backed by SQLite.
 pub struct ConfigStore {
@@ -83,6 +86,16 @@ impl ConfigStore {
         self.set(KEY_PROVER_ENDPOINT, url)
     }
 
+    /// Get the optional bearer token to send with prover requests.
+    pub fn prover_auth_token(&self) -> Result<Option<String>> {
+        self.get(KEY_PROVER_AUTH_TOKEN)
+    }
+
+    /// Set the bearer token used for prover requests.
+    pub fn set_prover_auth_token(&self, token: &str) -> Result<()> {
+        self.set(KEY_PROVER_AUTH_TOKEN, token)
+    }
+
     /// Get the registry endpoint URL.
     pub fn registry_endpoint(&self) -> Result<Option<String>> {
         self.get(KEY_REGISTRY_ENDPOINT)
@@ -91,5 +104,28 @@ impl ConfigStore {
     /// Set the registry endpoint URL.
     pub fn set_registry_endpoint(&self, url: &str) -> Result<()> {
         self.set(KEY_REGISTRY_ENDPOINT, url)
+    }
+
+    /// Get the optional bearer token to send with registry requests.
+    pub fn registry_auth_token(&self) -> Result<Option<String>> {
+        self.get(KEY_REGISTRY_AUTH_TOKEN)
+    }
+
+    /// Set the bearer token used for registry requests.
+    pub fn set_registry_auth_token(&self, token: &str) -> Result<()> {
+        self.set(KEY_REGISTRY_AUTH_TOKEN, token)
+    }
+
+    /// Whether the background loop should pull from the registry and publish
+    /// certificates on its own. Off unless explicitly enabled: publishing
+    /// broadcasts to the relay, so it shouldn't start just because an
+    /// endpoint happens to be configured.
+    pub fn registry_auto_sync(&self) -> Result<bool> {
+        Ok(self.get(KEY_REGISTRY_AUTO_SYNC)?.as_deref() == Some("1"))
+    }
+
+    /// Enable or disable automatic registry sync.
+    pub fn set_registry_auto_sync(&self, enabled: bool) -> Result<()> {
+        self.set(KEY_REGISTRY_AUTO_SYNC, if enabled { "1" } else { "0" })
     }
 }

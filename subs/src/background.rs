@@ -1,17 +1,45 @@
 //! Background tasks for subsd.
 //!
 //! Runs a proving loop that fetches estimates for pending proving requests
-//! and polls user-initiated prover jobs for completion.
+//! and polls user-initiated prover jobs for completion, plus an optional
+//! registry loop that pulls, stages, acknowledges and publishes.
 
 use std::time::Duration;
 use spaces_protocol::slabel::SLabel;
 use crate::state::AppState;
+use crate::routes::commits::PUBLISH_BATCH_SIZE;
+use crate::routes::registry::sync_once;
 
 /// Interval between proving loop iterations when no work is found.
 const POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Interval between polls when waiting for a prover job to complete.
 const JOB_POLL_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Interval between registry loop iterations.
+///
+/// Polling this often is cheap: it's one GET against the operator's own
+/// registry, and the publish step below short-circuits on a local query when
+/// there's nothing to send. Relay traffic is paced by MESSAGE_SPACING rather
+/// than by this interval, so tightening it doesn't affect the relay.
+const REGISTRY_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Minimum gap between two publishes.
+///
+/// The relay's binding limit for us is the per-IP /message bucket: 60 per
+/// minute, counted per message rather than per certificate. Spacing sends
+/// caps us at 40/min however many spaces are being drained — the loop
+/// publishes once per space per iteration, so without this the rate would
+/// scale with space count and could exceed the bucket on its own.
+///
+/// The per-space (100 updates/min) and per-handle (3 per 5 min) content
+/// limits do not apply to this loop as of certrelay 0.2.7: they now charge
+/// only same-or-lower-epoch churn, i.e. cheap off-chain record bumps. A
+/// first publish is free, and a temp-to-final republish rides a new
+/// commitment, which advances the space's epoch_height and is likewise
+/// free. Only republishing a handle at an unchanged commitment is charged,
+/// which publish_certs does not do.
+const MESSAGE_SPACING: Duration = Duration::from_millis(1500);
 
 /// Start the background proving loop.
 ///
@@ -21,6 +49,92 @@ pub fn spawn_proving_loop(state: AppState) {
     tokio::spawn(async move {
         proving_loop(state).await;
     });
+}
+
+/// Start the background registry loop.
+///
+/// Drives the full pull -> stage -> ack -> publish cycle. Idles unless
+/// `registry_auto_sync` is enabled and an endpoint is configured, so the
+/// task is always spawned and the toggle takes effect without a restart.
+pub fn spawn_registry_loop(state: AppState) {
+    tokio::spawn(async move {
+        registry_loop(state).await;
+    });
+}
+
+async fn registry_loop(state: AppState) {
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    loop {
+        let enabled = state.config.registry_auto_sync().unwrap_or(false);
+        let endpoint = state.config.registry_endpoint().ok().flatten();
+
+        let (Some(endpoint), true) = (endpoint, enabled) else {
+            tokio::time::sleep(REGISTRY_POLL_INTERVAL).await;
+            continue;
+        };
+        let auth_token = state.config.registry_auth_token().ok().flatten();
+
+        match sync_once(&state, &endpoint, auth_token.as_deref()).await {
+            Ok(outcome) => {
+                if outcome.pulled > 0 {
+                    tracing::info!(
+                        "Registry sync: pulled {}, staged {}",
+                        outcome.pulled,
+                        outcome.staged
+                    );
+                }
+                for err in &outcome.errors {
+                    tracing::warn!("Registry sync: {}", err);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Registry sync failed: {}", e);
+            }
+        }
+
+        // Publish one batch per space per iteration, spacing the sends so the
+        // message rate stays inside the relay's per-IP bucket no matter how
+        // many spaces are being drained at once.
+        let mut sent_any = false;
+        for space in &state.operator.list_spaces() {
+            if sent_any {
+                tokio::time::sleep(MESSAGE_SPACING).await;
+            }
+
+            match state
+                .operator
+                .publish_certs(space, PUBLISH_BATCH_SIZE, &[])
+                .await
+            {
+                Ok((0, 0)) => {}
+                Ok((published, remaining)) => {
+                    sent_any = true;
+                    tracing::info!(
+                        "[{}] Published {} cert(s), {} remaining",
+                        space,
+                        published,
+                        remaining
+                    );
+                }
+                Err(e) => {
+                    // A missing fabric is a permanent, expected configuration
+                    // state and would otherwise warn on every iteration.
+                    // Anything else is a real failure and has to be visible —
+                    // logging these at debug hid a publish that was failing
+                    // every cycle while the UI just showed a stuck count.
+                    let msg = e.to_string();
+                    if msg.contains("fabric") {
+                        tracing::debug!("[{}] Publish skipped: {}", space, msg);
+                    } else {
+                        tracing::warn!("[{}] Publish failed: {}", space, msg);
+                    }
+                }
+            }
+        }
+
+        tokio::time::sleep(REGISTRY_POLL_INTERVAL).await;
+    }
 }
 
 async fn proving_loop(state: AppState) {
@@ -35,6 +149,7 @@ async fn proving_loop(state: AppState) {
                 continue;
             }
         };
+        let prover_auth_token = state.config.prover_auth_token().ok().flatten();
 
         let spaces = state.operator.list_spaces();
         let mut did_work = false;
@@ -61,7 +176,7 @@ async fn proving_loop(state: AppState) {
 
             if let Some(job_id) = existing_job {
                 // Poll existing in-flight jobs to completion
-                match poll_job(&state, &prover_endpoint, space, &job_key, &job_id, commitment_id, is_fold).await {
+                match poll_job(&state, &prover_endpoint, prover_auth_token.as_deref(), space, &job_key, &job_id, commitment_id, is_fold).await {
                     Ok(true) => {
                         tracing::info!("[{}] Proof complete for commitment {}", space, commitment_id);
                     }
@@ -72,7 +187,7 @@ async fn proving_loop(state: AppState) {
                 }
             } else {
                 // Only fetch and store the estimate; proving is user-initiated via the UI
-                if let Err(e) = fetch_and_store_estimate(&state, &prover_endpoint, space, commitment_id, &request).await {
+                if let Err(e) = fetch_and_store_estimate(&state, &prover_endpoint, prover_auth_token.as_deref(), space, commitment_id, &request).await {
                     tracing::debug!("[{}] Could not fetch estimate: {}", space, e);
                 }
             }
@@ -87,6 +202,7 @@ async fn proving_loop(state: AppState) {
 async fn fetch_and_store_estimate(
     state: &AppState,
     prover_endpoint: &str,
+    prover_auth_token: Option<&str>,
     space: &SLabel,
     commitment_id: i64,
     request: &subs_types::ProvingRequest,
@@ -95,13 +211,15 @@ async fn fetch_and_store_estimate(
     let client = reqwest::Client::new();
     let url = format!("{}/estimate", prover_endpoint.trim_end_matches('/'));
 
-    let response = client
+    let mut req = client
         .post(&url)
         .header("Content-Type", "application/octet-stream")
         .body(request_bytes)
-        .timeout(std::time::Duration::from_secs(120))
-        .send()
-        .await?;
+        .timeout(std::time::Duration::from_secs(120));
+    if let Some(t) = prover_auth_token {
+        req = req.bearer_auth(t);
+    }
+    let response = req.send().await?;
 
     if !response.status().is_success() {
         anyhow::bail!("prover returned {}", response.status());
@@ -117,6 +235,7 @@ async fn fetch_and_store_estimate(
 async fn poll_job(
     state: &AppState,
     prover_endpoint: &str,
+    prover_auth_token: Option<&str>,
     space: &SLabel,
     job_key: &str,
     job_id: &str,
@@ -126,7 +245,11 @@ async fn poll_job(
     let client = reqwest::Client::new();
     let url = format!("{}/jobs/{}", prover_endpoint.trim_end_matches('/'), job_id);
 
-    let response = client.get(&url).send().await?;
+    let mut req = client.get(&url);
+    if let Some(t) = prover_auth_token {
+        req = req.bearer_auth(t);
+    }
+    let response = req.send().await?;
 
     if !response.status().is_success() {
         if response.status() == reqwest::StatusCode::NOT_FOUND {
@@ -148,7 +271,11 @@ async fn poll_job(
     match job.status.as_str() {
         "complete" => {
             let receipt_url = format!("{}/jobs/{}/receipt", prover_endpoint.trim_end_matches('/'), job_id);
-            let receipt_response = client.get(&receipt_url).send().await?;
+            let mut req = client.get(&receipt_url);
+            if let Some(t) = prover_auth_token {
+                req = req.bearer_auth(t);
+            }
+            let receipt_response = req.send().await?;
 
             if !receipt_response.status().is_success() {
                 anyhow::bail!("receipt download failed: {}", receipt_response.status());

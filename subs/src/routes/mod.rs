@@ -7,6 +7,7 @@ pub mod console;
 mod error;
 pub mod proving;
 pub mod query;
+pub mod logs;
 pub mod registry;
 pub mod requests;
 pub mod status;
@@ -29,6 +30,7 @@ pub fn router() -> Router<AppState> {
         .route("/ui/operate", get(web::operate_page))
         .route("/ui/query", get(web::query_page))
         .route("/ui/settings", get(web::settings_page))
+        .route("/ui/logs", get(web::logs_page))
         .route("/ui/transactions", get(web::transactions_page))
         .route("/ui/spaces/:space", get(web::space_page))
         .route("/ui/spaces/:space/handles/:handle", get(web::handle_page))
@@ -78,6 +80,7 @@ pub fn router() -> Router<AppState> {
         .route("/config/test/prover", post(config::test_prover))
         .route("/config/test/registry", post(config::test_registry))
         // API: Registry integration
+        .route("/logs", get(logs::get_logs))
         .route("/registry/status", get(registry::registry_status))
         .route("/registry/sync", post(registry::sync_from_registry))
         .route("/registry/notify", post(registry::notify_registry))

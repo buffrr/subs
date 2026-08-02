@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Logs - subsd{% endblock %}
+{% block nav_logs_cls %}active{% endblock %}
+
+{% block topbar_left %}
+<span class="topbar-title">Logs</span>
+{% endblock %}
+
+{% block content %}
+<div class="anim" style="display:flex;flex-direction:column;gap:16px;height:calc(100vh - 120px)">
+
+    <div class="card anim" style="animation-delay:.04s;display:flex;flex-direction:column;flex:1;min-height:0">
+        <div class="section-header">
+            <div class="flex items-center justify-between" style="width:100%">
+                <div class="flex items-center gap-2">
+                    <div class="card-icon" style="background:var(--blue-dim);width:28px;height:28px;border-radius:8px">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--blue)"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h10"/></svg>
+                    </div>
+                    <div>
+                        <h3 style="text-transform:none;letter-spacing:0">Live Log</h3>
+                        <span style="font-family:var(--mono);font-size:10px;color:var(--text-muted)" id="log-meta">connecting…</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <select id="log-level" onchange="renderLogs()" class="input-field" style="width:auto;padding:4px 8px;font-size:11px">
+                        <option value="TRACE">all levels</option>
+                        <option value="DEBUG">debug+</option>
+                        <option value="INFO" selected>info+</option>
+                        <option value="WARN">warn+</option>
+                        <option value="ERROR">error only</option>
+                    </select>
+                    <input type="text" id="log-filter" oninput="renderLogs()" placeholder="filter text…" class="input-field" style="width:180px;padding:4px 8px;font-size:11px">
+                    <label class="flex items-center gap-1" style="font-family:var(--mono);font-size:11px;color:var(--text-muted);cursor:pointer">
+                        <input type="checkbox" id="log-follow" checked> follow
+                    </label>
+                    <button onclick="clearLogs()" class="btn-secondary" style="padding:4px 10px;font-size:11px">Clear</button>
+                </div>
+            </div>
+        </div>
+        <div class="section-body" style="flex:1;min-height:0;padding:0">
+            <div id="log-view" style="height:100%;overflow:auto;font-family:var(--mono);font-size:11px;line-height:1.55;padding:12px 14px"></div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+let logEntries = [];
+let logCursor = null;
+const LEVEL_ORDER = { TRACE: 0, DEBUG: 1, INFO: 2, WARN: 3, ERROR: 4 };
+const LEVEL_COLOR = {
+    TRACE: 'var(--text-muted)',
+    DEBUG: 'var(--text-muted)',
+    INFO:  'var(--blue)',
+    WARN:  'var(--orange, #d98b3a)',
+    ERROR: 'var(--red, #d9534f)',
+};
+
+function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+}
+
+function renderLogs() {
+    const minLevel = LEVEL_ORDER[document.getElementById('log-level').value] ?? 2;
+    const needle = document.getElementById('log-filter').value.toLowerCase();
+    const view = document.getElementById('log-view');
+
+    // Sticky-bottom: only auto-scroll when already pinned there, so reading
+    // scrollback isn't yanked away by incoming lines.
+    const follow = document.getElementById('log-follow').checked;
+    const pinned = view.scrollHeight - view.scrollTop - view.clientHeight < 40;
+
+    const rows = logEntries.filter(e => {
+        if ((LEVEL_ORDER[e.level] ?? 2) < minLevel) return false;
+        if (!needle) return true;
+        return (e.message + ' ' + e.target).toLowerCase().includes(needle);
+    });
+
+    view.innerHTML = rows.map(e => {
+        const color = LEVEL_COLOR[e.level] || 'var(--text-primary)';
+        return `<div style="display:flex;gap:8px;white-space:pre-wrap;word-break:break-word">`
+            + `<span style="color:var(--text-muted);flex-shrink:0">${e.timestamp}</span>`
+            + `<span style="color:${color};flex-shrink:0;width:44px">${e.level}</span>`
+            + `<span style="color:var(--text-muted);flex-shrink:0">${escapeHtml(e.target)}</span>`
+            + `<span style="color:var(--text-primary)">${escapeHtml(e.message)}</span>`
+            + `</div>`;
+    }).join('');
+
+    document.getElementById('log-meta').textContent =
+        `${rows.length} shown / ${logEntries.length} buffered`;
+
+    if (follow && pinned) view.scrollTop = view.scrollHeight;
+}
+
+async function pollLogs() {
+    try {
+        const url = logCursor === null ? '/logs' : `/logs?after=${logCursor}`;
+        const r = await fetch(url);
+        const j = await r.json();
+        if (j.entries.length) {
+            logEntries = logEntries.concat(j.entries);
+            // Mirror the server's retention so a long-lived tab doesn't grow
+            // without bound.
+            if (logEntries.length > 5000) logEntries = logEntries.slice(-5000);
+        }
+        logCursor = j.head;
+        renderLogs();
+    } catch (e) {
+        document.getElementById('log-meta').textContent = 'disconnected — retrying';
+    }
+}
+
+function clearLogs() {
+    logEntries = [];
+    renderLogs();
+}
+
+pollLogs();
+setInterval(pollLogs, 1000);
+</script>
+{% endblock %}

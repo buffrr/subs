@@ -14,6 +14,7 @@
 
 mod background;
 mod config;
+mod logs;
 mod routes;
 mod state;
 
@@ -81,13 +82,15 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
+    // Initialize tracing. The capture layer feeds the Logs page and is
+    // installed here so nothing emitted after startup is missed.
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "subsd=info,tower_http=debug".into()),
         )
         .with(tracing_subscriber::fmt::layer())
+        .with(logs::capture_layer())
         .init();
 
     let cli = Cli::parse();
@@ -251,6 +254,9 @@ async fn run_server_with_testrig(
 async fn run_server_inner(state: AppState, port: u16) -> Result<()> {
     // Start background proving loop
     background::spawn_proving_loop(state.clone());
+
+    // Start background registry loop (idles unless auto-sync is enabled)
+    background::spawn_registry_loop(state.clone());
 
     // Build router
     let app = routes::router()

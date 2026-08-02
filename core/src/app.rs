@@ -195,7 +195,11 @@ impl LiveSpaceInfo {
             return Err(anyhow!("handle {} neither committed nor staged", name));
         };
         let zone = Zone {
+            // Both anchor fields are zeroed by `signing_bytes()` before the
+            // zone is serialized, so this zone — which exists only to produce
+            // that signing payload — carries no anchor state.
             anchor: 0,
+            anchor_hash: [0u8; 32],
             sovereignty: SovereigntyState::Dependent,
             canonical: name.clone(),
             handle: name.clone(),
@@ -377,11 +381,13 @@ impl Operator {
         let sets = AnchorSets::from_anchors(anchors);
         _ = fabric.trust_from_set(sets.latest().unwrap())?;
 
-        let rb = fabric.resolve_all(handles).await
+        let zones = fabric.resolve_all(handles).await
             .map_err(|e| anyhow!("resolve error: {}", e))?;
 
-        let results = rb.zones.into_iter().map(|zone| {
-            let badge = fabric.badge_for(zone.sovereignty, &rb.roots);
+        let results = zones.into_iter().map(|zone| {
+            // fabric 0.2 derives the badge from the zone's own anchor_hash
+            // instead of taking sovereignty plus a separate root set.
+            let badge = fabric.badge(&zone);
             ResolvedZone {
                 badge: match badge {
                     Badge::Orange => "orange",
