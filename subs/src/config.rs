@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS config (
 pub const KEY_PROVER_ENDPOINT: &str = "prover_endpoint";
 pub const KEY_PROVER_AUTH_TOKEN: &str = "prover_auth_token";
 pub const KEY_REGISTRY_ENDPOINT: &str = "registry_endpoint";
+pub const KEY_REGISTRY_AUTH_TOKEN: &str = "registry_auth_token";
 pub const KEY_REGISTRY_AUTO_SYNC: &str = "registry_auto_sync";
 
 /// Configuration storage backed by SQLite.
@@ -103,6 +104,16 @@ impl ConfigStore {
     /// Set the registry endpoint URL.
     pub fn set_registry_endpoint(&self, url: &str) -> Result<()> {
         self.set(KEY_REGISTRY_ENDPOINT, url)
+    }
+
+    /// Get the optional bearer token to send with registry requests.
+    pub fn registry_auth_token(&self) -> Result<Option<String>> {
+        self.get(KEY_REGISTRY_AUTH_TOKEN)
+    }
+
+    /// Set the bearer token used for registry requests.
+    pub fn set_registry_auth_token(&self, token: &str) -> Result<()> {
+        self.set(KEY_REGISTRY_AUTH_TOKEN, token)
     }
 
     /// Whether the background loop should pull from the registry and publish

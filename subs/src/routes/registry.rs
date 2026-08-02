@@ -45,20 +45,29 @@ pub struct SyncOutcome {
 /// Shared by `POST /registry/sync` and the background loop, so the caller
 /// decides what a missing endpoint means (400 for the route, skip for the
 /// loop) rather than this deciding for them.
-pub async fn sync_once(state: &AppState, registry_endpoint: &str) -> anyhow::Result<SyncOutcome> {
+pub async fn sync_once(
+    state: &AppState,
+    registry_endpoint: &str,
+    auth_token: Option<&str>,
+) -> anyhow::Result<SyncOutcome> {
     let base = registry_endpoint.trim_end_matches('/');
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
 
-    let pending_url = format!("{}/pending", base);
-    let response = client
-        .get(&pending_url)
+    let mut req = client.get(format!("{}/pending", base));
+    if let Some(t) = auth_token {
+        req = req.bearer_auth(t);
+    }
+    let response = req
         .send()
         .await
         .map_err(|e| anyhow::anyhow!("failed to connect to registry: {}", e))?;
 
+    if let Some(msg) = auth_error(response.status()) {
+        anyhow::bail!(msg);
+    }
     if !response.status().is_success() {
         anyhow::bail!("registry returned status: {}", response.status());
     }
@@ -124,7 +133,7 @@ pub async fn sync_once(state: &AppState, registry_endpoint: &str) -> anyhow::Res
     // cycle re-pulls and re-acks them (add_requests dedupes), so this
     // self-heals as long as we keep acking what we pulled.
     if !pulled_handles.is_empty() {
-        if let Err(e) = ack(&client, base, &pulled_handles).await {
+        if let Err(e) = ack(&client, base, auth_token, &pulled_handles).await {
             // Not fatal: staging already succeeded locally.
             tracing::warn!("Failed to acknowledge handles to registry: {}", e);
             errors.push(format!("ack failed: {}", e));
@@ -139,22 +148,42 @@ pub async fn sync_once(state: &AppState, registry_endpoint: &str) -> anyhow::Res
 }
 
 /// POST /ack, checking the response rather than firing and forgetting.
-async fn ack(client: &reqwest::Client, base: &str, handles: &[String]) -> anyhow::Result<()> {
+async fn ack(
+    client: &reqwest::Client,
+    base: &str,
+    auth_token: Option<&str>,
+    handles: &[String],
+) -> anyhow::Result<()> {
     #[derive(Serialize)]
     struct AckRequest<'a> {
         handles: &'a [String],
     }
 
-    let response = client
+    let mut req = client
         .post(format!("{}/ack", base))
-        .json(&AckRequest { handles })
-        .send()
-        .await?;
+        .json(&AckRequest { handles });
+    if let Some(t) = auth_token {
+        req = req.bearer_auth(t);
+    }
+    let response = req.send().await?;
 
+    if let Some(msg) = auth_error(response.status()) {
+        anyhow::bail!(msg);
+    }
     if !response.status().is_success() {
         anyhow::bail!("registry returned {}", response.status());
     }
     Ok(())
+}
+
+/// Name the likely fix when the registry rejects our credentials, so a bad
+/// token doesn't read like an ordinary upstream failure.
+pub(crate) fn auth_error(status: reqwest::StatusCode) -> Option<String> {
+    matches!(
+        status,
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+    )
+    .then(|| format!("registry rejected our credentials ({}); check the auth token in Settings", status))
 }
 
 /// POST /registry/sync - Pull pending handles from registry and stage them
@@ -174,7 +203,9 @@ pub async fn sync_from_registry(State(state): State<AppState>) -> Result<Json<Sy
         }
     };
 
-    match sync_once(&state, &registry_endpoint).await {
+    let auth_token = state.config.registry_auth_token().ok().flatten();
+
+    match sync_once(&state, &registry_endpoint, auth_token.as_deref()).await {
         Ok(outcome) => Ok(Json(SyncResponse {
             success: outcome.errors.is_empty(),
             pulled: outcome.pulled,
@@ -252,7 +283,7 @@ pub async fn notify_registry(
         .build()
         .unwrap();
 
-    let webhook_url = format!("{}/webhook/committed", registry_endpoint.trim_end_matches('/'));
+    let committed_url = format!("{}/committed", registry_endpoint.trim_end_matches('/'));
 
     #[derive(Serialize)]
     struct WebhookPayload {
@@ -265,7 +296,11 @@ pub async fn notify_registry(
         handles: handle_names.clone(),
     };
 
-    let response = match client.post(&webhook_url).json(&payload).send().await {
+    let mut notify_req = client.post(&committed_url).json(&payload);
+    if let Some(t) = state.config.registry_auth_token().ok().flatten() {
+        notify_req = notify_req.bearer_auth(t);
+    }
+    let response = match notify_req.send().await {
         Ok(r) => r,
         Err(e) => {
             return Err(json_error(
@@ -278,7 +313,7 @@ pub async fn notify_registry(
     if !response.status().is_success() {
         return Err(json_error(
             StatusCode::BAD_GATEWAY,
-            format!("Registry webhook returned: {}", response.status()),
+            format!("Registry /committed returned: {}", response.status()),
         ));
     }
 

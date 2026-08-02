@@ -8,7 +8,9 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::config::{KEY_PROVER_AUTH_TOKEN, KEY_PROVER_ENDPOINT, KEY_REGISTRY_ENDPOINT};
+use crate::config::{
+    KEY_PROVER_AUTH_TOKEN, KEY_PROVER_ENDPOINT, KEY_REGISTRY_AUTH_TOKEN, KEY_REGISTRY_ENDPOINT,
+};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -32,6 +34,9 @@ pub struct ConfigResponse {
     /// returned so it doesn't leak via the UI / API.
     pub prover_auth_token_set: bool,
     pub registry_endpoint: Option<String>,
+    /// True when a registry auth token is configured. The value itself is
+    /// never returned, so it can't leak via the UI / API.
+    pub registry_auth_token_set: bool,
     /// Whether the background loop pulls from the registry and publishes.
     pub registry_auto_sync: bool,
 }
@@ -43,6 +48,9 @@ pub struct SetConfigRequest {
     #[serde(default)]
     pub prover_auth_token: Option<String>,
     pub registry_endpoint: Option<String>,
+    /// New registry token. `Some("")` clears it. `None` leaves it unchanged.
+    #[serde(default)]
+    pub registry_auth_token: Option<String>,
     /// `None` leaves the auto-sync setting unchanged.
     #[serde(default)]
     pub registry_auto_sync: Option<bool>,
@@ -54,6 +62,7 @@ pub struct SetConfigResponse {
     pub prover_endpoint: Option<String>,
     pub prover_auth_token_set: bool,
     pub registry_endpoint: Option<String>,
+    pub registry_auth_token_set: bool,
     pub registry_auto_sync: bool,
 }
 
@@ -88,12 +97,19 @@ pub async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
         }
     };
 
+    let registry_auth_token_set = state
+        .config
+        .registry_auth_token()
+        .ok()
+        .flatten()
+        .is_some_and(|s| !s.is_empty());
     let registry_auto_sync = state.config.registry_auto_sync().unwrap_or(false);
 
     Json(ConfigResponse {
         prover_endpoint,
         prover_auth_token_set,
         registry_endpoint,
+        registry_auth_token_set,
         registry_auto_sync,
     })
     .into_response()
@@ -165,6 +181,22 @@ pub async fn set_config(
         }
     }
 
+    // Set registry auth token if provided. Empty string clears it.
+    if let Some(ref token) = req.registry_auth_token {
+        let result = if token.is_empty() {
+            state.config.delete(KEY_REGISTRY_AUTH_TOKEN)
+        } else {
+            state.config.set_registry_auth_token(token)
+        };
+        if let Err(e) = result {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response();
+        }
+    }
+
     // Set auto-sync if provided
     if let Some(enabled) = req.registry_auto_sync {
         if let Err(e) = state.config.set_registry_auto_sync(enabled) {
@@ -185,6 +217,12 @@ pub async fn set_config(
         .flatten()
         .is_some_and(|s| !s.is_empty());
     let registry_endpoint = state.config.registry_endpoint().ok().flatten();
+    let registry_auth_token_set = state
+        .config
+        .registry_auth_token()
+        .ok()
+        .flatten()
+        .is_some_and(|s| !s.is_empty());
     let registry_auto_sync = state.config.registry_auto_sync().unwrap_or(false);
 
     Json(SetConfigResponse {
@@ -192,6 +230,7 @@ pub async fn set_config(
         prover_endpoint,
         prover_auth_token_set,
         registry_endpoint,
+        registry_auth_token_set,
         registry_auto_sync,
     })
     .into_response()
@@ -245,56 +284,57 @@ pub async fn test_prover(
 }
 
 /// POST /config/test/registry - Test registry endpoint connectivity
-pub async fn test_registry(Json(req): Json<TestEndpointRequest>) -> impl IntoResponse {
+pub async fn test_registry(
+    State(state): State<AppState>,
+    Json(req): Json<TestEndpointRequest>,
+) -> impl IntoResponse {
     let endpoint = req.endpoint.trim_end_matches('/');
 
-    // Try to connect to the registry's health endpoint
+    // Fall back to the stored token so an existing setup can be re-tested
+    // without retyping it. Explicit "" means "test without auth".
+    let token = match req.auth_token {
+        Some(t) if !t.is_empty() => Some(t),
+        Some(_) => None,
+        None => state.config.registry_auth_token().ok().flatten(),
+    };
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .unwrap();
 
-    // Try common health check paths
-    let health_url = format!("{}/health", endpoint);
+    // /health sits inside the registry's authenticated set, so a 200 here
+    // confirms both reachability and that the token is accepted.
+    let mut probe = client.get(format!("{}/health", endpoint));
+    if let Some(t) = &token {
+        probe = probe.bearer_auth(t);
+    }
 
-    match client.get(&health_url).send().await {
-        Ok(response) => {
-            if response.status().is_success() {
-                Json(TestEndpointResponse {
-                    success: true,
-                    error: None,
-                })
-            } else if response.status().as_u16() == 404 {
-                // Try root path if /health doesn't exist
-                match client.get(endpoint).send().await {
-                    Ok(resp) => {
-                        if resp.status().is_success() || resp.status().as_u16() < 500 {
-                            Json(TestEndpointResponse {
-                                success: true,
-                                error: None,
-                            })
-                        } else {
-                            Json(TestEndpointResponse {
-                                success: false,
-                                error: Some(format!("Registry returned status: {}", resp.status())),
-                            })
-                        }
-                    }
-                    Err(e) => Json(TestEndpointResponse {
-                        success: false,
-                        error: Some(format!("Connection failed: {}", e)),
-                    }),
-                }
-            } else {
-                Json(TestEndpointResponse {
-                    success: false,
-                    error: Some(format!("Registry returned status: {}", response.status())),
-                })
-            }
+    match probe.send().await {
+        Ok(response) if response.status().is_success() => Json(TestEndpointResponse {
+            success: true,
+            error: None,
+        }),
+        Ok(response) if super::registry::auth_error(response.status()).is_some() => {
+            Json(TestEndpointResponse {
+                success: false,
+                error: Some(match token {
+                    Some(_) => format!("Registry rejected the auth token ({})", response.status()),
+                    None => format!(
+                        "Registry requires authentication ({}); set an auth token",
+                        response.status()
+                    ),
+                }),
+            })
         }
+        Ok(response) => Json(TestEndpointResponse {
+            success: false,
+            error: Some(format!("Registry returned status: {}", response.status())),
+        }),
         Err(e) => Json(TestEndpointResponse {
             success: false,
             error: Some(format!("Connection failed: {}", e)),
         }),
     }
 }
+

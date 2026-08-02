@@ -75,6 +75,12 @@ Then open http://localhost:7777 in a browser. Under **Settings**, set the prover
 
 From the UI you can stage handles, run local commits, broadcast on-chain commitments, and issue / export certificates.
 
+### 3. Connect a registry (optional)
+
+A registry is the public-facing service where users request handles, keeping subs private since it holds wallet keys. subs polls it, stages what it finds, and publishes certificates.
+
+See [REGISTRY.md](REGISTRY.md) to build one, and [`examples/registry-server`](examples/registry-server) for a working reference.
+
 ### Test rig (local dev)
 
 The `test-rig` feature spins up a fresh regtest `bitcoind` + `spaced` automatically, so no external setup is needed. Useful for hacking on subs without a live node.

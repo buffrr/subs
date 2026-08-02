@@ -1,42 +1,40 @@
 //! Example Registry Server for Subs
 //!
-//! This is a simple example showing how to build a registry server that:
-//! 1. Accepts handle registration requests from users (public API)
-//! 2. Exposes pending handles for subsd to pull
-//! 3. Receives webhooks from subsd when handles are committed
+//! Accepts handle registrations, exposes a work queue to subsd, and receives
+//! commit notifications. Two API keys guard the non-public surface:
 //!
-//! Architecture:
-//! ```
-//! ┌─────────┐     ┌──────────────────┐     ┌─────────┐
-//! │  Users  │────>│  Registry Server │<────│  subsd  │
-//! └─────────┘     └──────────────────┘     └─────────┘
-//!                   (public)                 (private)
-//! ```
+//! - `REGISTRY_API_KEY` → required on `POST /register`, this example's own
+//!   intake path, on the assumption registrations arrive from a backend once
+//!   a purchase is paid. How requests reach a registry is not part of the
+//!   subs contract; a different registry might take them from a public form
+//!   or an admin panel instead.
+//! - `SUBSD_API_KEY` → required on `GET /health`, `GET /pending`, `POST /ack`,
+//!   and `POST /committed` (called by subsd; it holds wallet keys so these
+//!   endpoints must not be publicly reachable). `/health` sits inside the
+//!   guarded set deliberately: subsd's "Test" button probes it, so a
+//!   successful probe doubles as proof the token is wired correctly.
 //!
-//! - Users submit registrations to the registry (public)
-//! - subsd pulls pending handles from the registry
-//! - subsd calls webhook when handles are committed
+//! `/status/:handle` remains open — it is the user's own status poll
+//! endpoint.
 //!
-//! In production, you would customize this to:
-//! - Add authentication for users
-//! - Add API key auth for subsd endpoints
-//! - Validate handle requests (e.g., check payment, verify identity)
-//! - Store registration state in a database
-//! - Send notifications to users when their handles are committed
+//! Both keys are checked as `Authorization: Bearer <key>`. If either is
+//! missing at boot the process refuses to start (fail-secure).
 //!
 //! # Usage
 //!
 //! ```bash
-//! registry-server --port 8080
+//! REGISTRY_API_KEY=... SUBSD_API_KEY=... registry-server --port 8080
 //! ```
 
+use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
+    extract::{Path, Request, State},
+    http::{HeaderMap, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -62,6 +60,10 @@ struct Cli {
 struct AppState {
     /// In-memory store of registrations (in production, use a database)
     registrations: RwLock<Vec<Registration>>,
+    /// Bearer token required for /register.
+    registry_api_key: String,
+    /// Bearer token required for /health, /pending, /ack, /committed.
+    subsd_api_key: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -82,7 +84,6 @@ enum RegistrationStatus {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -92,23 +93,41 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
+    let registry_api_key = require_env("REGISTRY_API_KEY")?;
+    let subsd_api_key = require_env("SUBSD_API_KEY")?;
+    if registry_api_key == subsd_api_key {
+        anyhow::bail!("REGISTRY_API_KEY and SUBSD_API_KEY must differ (blast-radius separation)");
+    }
+
     let state = Arc::new(AppState {
         registrations: RwLock::new(Vec::new()),
+        registry_api_key,
+        subsd_api_key,
     });
 
-    let app = Router::new()
-        // Health check
-        .route("/health", get(health))
-
-        // Public endpoints (for users)
+    // Endpoints protected by REGISTRY_API_KEY (called by atbitcoin backend).
+    let registry_routes = Router::new()
         .route("/register", post(register_handle))
-        .route("/status/:handle", get(get_status))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_registry_key,
+        ));
 
-        // Private endpoints (for subs to call). In production, protect these with API key auth.
+    // Endpoints protected by SUBSD_API_KEY (called by subsd).
+    let subsd_routes = Router::new()
+        .route("/health", get(health))
         .route("/pending", get(get_pending_handles))
         .route("/ack", post(ack_handles))
-        .route("/webhook/committed", post(webhook_committed))
+        .route("/committed", post(committed))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_subsd_key,
+        ));
 
+    let app = Router::new()
+        .route("/status/:handle", get(get_status))
+        .merge(registry_routes)
+        .merge(subsd_routes)
         .layer(TraceLayer::new_for_http())
         .layer(
             CorsLayer::new()
@@ -121,14 +140,17 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::from(([0, 0, 0, 0], cli.port));
     tracing::info!("Registry server starting on http://{}", addr);
     tracing::info!("");
-    tracing::info!("Public endpoints (for users):");
-    tracing::info!("  POST /register     - Register a handle");
-    tracing::info!("  GET  /status/:h    - Check registration status");
+    tracing::info!("Public endpoints:");
+    tracing::info!("  GET  /status/:handle    - User-facing status poll");
     tracing::info!("");
-    tracing::info!("Private endpoints (for subsd):");
-    tracing::info!("  GET  /pending      - Get pending handles");
-    tracing::info!("  POST /ack          - Acknowledge handles were staged");
-    tracing::info!("  POST /webhook/committed - Notify committed handles");
+    tracing::info!("Requires REGISTRY_API_KEY (Bearer):");
+    tracing::info!("  POST /register          - Enqueue a handle for registration");
+    tracing::info!("");
+    tracing::info!("Requires SUBSD_API_KEY (Bearer):");
+    tracing::info!("  GET  /health            - Liveness + token check");
+    tracing::info!("  GET  /pending           - Pull work queue");
+    tracing::info!("  POST /ack               - Mark handles as staged");
+    tracing::info!("  POST /committed         - Notify committed handles");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app)
@@ -136,6 +158,59 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     Ok(())
+}
+
+fn require_env(name: &str) -> anyhow::Result<String> {
+    match env::var(name) {
+        Ok(v) if !v.trim().is_empty() => Ok(v),
+        _ => anyhow::bail!(
+            "{} must be set to a non-empty bearer token before starting the registry",
+            name
+        ),
+    }
+}
+
+/// Extract the bearer token from `Authorization: Bearer <value>`.
+fn bearer(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .map(str::trim)
+}
+
+/// Constant-time-ish compare — good enough for short bearer tokens.
+fn tokens_match(supplied: &str, expected: &str) -> bool {
+    if supplied.len() != expected.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (a, b) in supplied.bytes().zip(expected.bytes()) {
+        diff |= a ^ b;
+    }
+    diff == 0
+}
+
+async fn require_registry_key(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    match bearer(request.headers()) {
+        Some(token) if tokens_match(token, &state.registry_api_key) => Ok(next.run(request).await),
+        _ => Err(StatusCode::UNAUTHORIZED),
+    }
+}
+
+async fn require_subsd_key(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    match bearer(request.headers()) {
+        Some(token) if tokens_match(token, &state.subsd_api_key) => Ok(next.run(request).await),
+        _ => Err(StatusCode::UNAUTHORIZED),
+    }
 }
 
 /// Health check endpoint
@@ -158,18 +233,12 @@ struct RegisterResponse {
 }
 
 /// POST /register - Register a new handle
-///
-/// In production, you would:
-/// - Validate the request (check payment, verify identity, etc.)
-/// - Check if the handle is available
-/// - Store the registration in a database
 async fn register_handle(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RegisterRequest>,
 ) -> impl IntoResponse {
     tracing::info!("Registration request for handle: {}", req.handle);
 
-    // Basic validation
     if !req.handle.contains('@') {
         return (
             StatusCode::BAD_REQUEST,
@@ -180,7 +249,6 @@ async fn register_handle(
         );
     }
 
-    // Check if already registered
     {
         let registrations = state.registrations.read().await;
         if registrations.iter().any(|r| r.handle == req.handle) {
@@ -194,7 +262,6 @@ async fn register_handle(
         }
     }
 
-    // Add to pending registrations
     {
         let mut registrations = state.registrations.write().await;
         registrations.push(Registration {
@@ -222,7 +289,7 @@ struct StatusResponse {
     commitment_root: Option<String>,
 }
 
-/// GET /status/:handle - Get registration status
+/// GET /status/:handle - Get registration status (public)
 async fn get_status(
     State(state): State<Arc<AppState>>,
     Path(handle): Path<String>,
@@ -249,8 +316,6 @@ async fn get_status(
     }
 }
 
-// Private endpoints (for subs to call)
-
 #[derive(Serialize)]
 struct PendingHandle {
     handle: String,
@@ -263,9 +328,6 @@ struct PendingResponse {
 }
 
 /// GET /pending - Get pending handles for subsd to stage
-///
-/// subsd calls this to get handles that need to be staged.
-/// In production, protect this with API key authentication.
 async fn get_pending_handles(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let registrations = state.registrations.read().await;
 
@@ -284,7 +346,6 @@ async fn get_pending_handles(State(state): State<Arc<AppState>>) -> impl IntoRes
 
 #[derive(Deserialize)]
 struct AckRequest {
-    /// Handles that were successfully staged
     handles: Vec<String>,
 }
 
@@ -294,9 +355,6 @@ struct AckResponse {
 }
 
 /// POST /ack - Acknowledge handles were staged by subsd
-///
-/// subsd calls this after successfully staging handles.
-/// This moves them from "pending" to "staged" status.
 async fn ack_handles(
     State(state): State<Arc<AppState>>,
     Json(req): Json<AckRequest>,
@@ -318,26 +376,21 @@ async fn ack_handles(
 }
 
 #[derive(Deserialize)]
-struct WebhookCommittedPayload {
-    /// The commitment root
+struct CommittedPayload {
     root: String,
-    /// Handles that were committed
     handles: Vec<String>,
 }
 
 #[derive(Serialize)]
-struct WebhookResponse {
+struct CommittedResponse {
     received: bool,
     updated: usize,
 }
 
-/// POST /webhook/committed - Webhook called when handles are committed
-///
-/// subsd calls this after handles are committed on-chain.
-/// In production, verify the webhook signature.
-async fn webhook_committed(
+/// POST /committed - Called by subsd when handles are committed on-chain
+async fn committed(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<WebhookCommittedPayload>,
+    Json(payload): Json<CommittedPayload>,
 ) -> impl IntoResponse {
     tracing::info!(
         "Webhook: {} handles committed with root {}",
@@ -357,7 +410,7 @@ async fn webhook_committed(
         }
     }
 
-    Json(WebhookResponse {
+    Json(CommittedResponse {
         received: true,
         updated: count,
     })

@@ -47,21 +47,26 @@
                 </div>
                 <div>
                     <h3 style="text-transform:none;letter-spacing:0">Registry Server</h3>
-                    <span style="font-family:var(--mono);font-size:10px;color:var(--text-muted)">Handle registration & webhooks</span>
+                    <span style="font-family:var(--mono);font-size:10px;color:var(--text-muted)">Handle registration & commit notices</span>
                 </div>
             </div>
         </div>
         <div class="section-body" style="display:flex;flex-direction:column;gap:18px">
-            <div>
-                <div class="flex items-end gap-3">
-                    <div class="flex-1">
-                        <label for="registry-endpoint" class="form-label">Endpoint</label>
-                        <input type="text" id="registry-endpoint" placeholder="https://registry.example.com" class="input-field w-full">
-                    </div>
+            <div style="display:flex;flex-direction:column;gap:12px">
+                <div>
+                    <label for="registry-endpoint" class="form-label">Endpoint</label>
+                    <input type="text" id="registry-endpoint" placeholder="https://registry.example.com" class="input-field w-full">
+                </div>
+                <div>
+                    <label for="registry-auth-token" class="form-label">Auth Token <span style="color:var(--text-muted);font-weight:normal">(optional)</span></label>
+                    <input type="password" id="registry-auth-token" placeholder="(leave blank to keep current)" class="input-field w-full" autocomplete="off">
+                    <div id="registry-token-hint" style="margin-top:6px;font-size:11px;color:var(--text-muted)"></div>
+                </div>
+                <div class="flex items-center gap-3">
                     <button onclick="testRegistry()" class="btn-secondary">Test</button>
                     <button onclick="saveRegistry()" class="btn-primary">Save</button>
                 </div>
-                <div id="registry-status" class="hidden" style="margin-top:10px"></div>
+                <div id="registry-status" class="hidden"></div>
             </div>
             <div id="registry-sync-section" class="hidden" style="padding-top:18px;border-top:1px solid var(--border-subtle)">
                 <div class="flex items-center justify-between">
@@ -138,11 +143,41 @@ async function loadConfig() {
         document.getElementById('prover-auth-token').value = '';
         renderProverTokenHint(config.prover_auth_token_set);
         document.getElementById('registry-endpoint').value = config.registry_endpoint || '';
+        document.getElementById('registry-auth-token').value = '';
+        renderRegistryTokenHint(config.registry_auth_token_set);
         document.getElementById('current-prover').textContent = config.prover_endpoint || '(not set)';
         document.getElementById('current-registry').textContent = config.registry_endpoint || '(not set)';
         renderAutoSync(config.registry_auto_sync);
         updateSync(config.registry_endpoint);
     } catch (e) {}
+}
+
+function renderRegistryTokenHint(isSet) {
+    const el = document.getElementById('registry-token-hint');
+    if (isSet) {
+        el.innerHTML = 'A token is configured. Leave blank to keep it, or type a new one to replace. <a href="#" onclick="event.preventDefault();clearRegistryToken();" style="color:var(--accent)">Clear</a>';
+    } else {
+        el.textContent = 'No token set.';
+    }
+}
+
+async function clearRegistryToken() {
+    if (!confirm('Clear the registry auth token?')) return;
+    try {
+        const r = await fetch('/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ registry_auth_token: '' })
+        });
+        const j = await r.json();
+        if (j.success) {
+            showStatus('registry-status', 'Token cleared', true);
+            document.getElementById('registry-auth-token').value = '';
+            renderRegistryTokenHint(false);
+        }
+    } catch (e) {
+        showStatus('registry-status', e.message, false);
+    }
 }
 
 function renderAutoSync(enabled) {
@@ -252,10 +287,13 @@ async function testRegistry() {
     if (!ep) { showStatus('registry-status', 'Enter URL', false); return; }
     showStatus('registry-status', 'Testing...', true);
     try {
+        // Typed token wins; blank lets the server fall back to the stored one.
+        const tokField = document.getElementById('registry-auth-token').value;
+        const auth_token = tokField === '' ? null : tokField;
         const r = await fetch('/config/test/registry', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ endpoint: ep })
+            body: JSON.stringify({ endpoint: ep, auth_token })
         });
         const j = await r.json();
         showStatus('registry-status', j.success ? 'Connected' : (j.error || 'Failed'), j.success);
@@ -266,16 +304,25 @@ async function testRegistry() {
 
 async function saveRegistry() {
     const ep = document.getElementById('registry-endpoint').value.trim();
+    const tokField = document.getElementById('registry-auth-token').value;
+    // Only send the token when the user typed something: the server treats
+    // null as unchanged, "" as clear, non-empty as set.
+    const body = { registry_endpoint: ep || null };
+    if (tokField !== '') {
+        body.registry_auth_token = tokField;
+    }
     try {
         const r = await fetch('/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ registry_endpoint: ep || null })
+            body: JSON.stringify(body)
         });
         const j = await r.json();
         if (j.success) {
             showStatus('registry-status', 'Saved', true);
             document.getElementById('current-registry').textContent = ep || '(not set)';
+            document.getElementById('registry-auth-token').value = '';
+            renderRegistryTokenHint(j.registry_auth_token_set);
             updateSync(ep);
         } else {
             showStatus('registry-status', 'Failed', false);

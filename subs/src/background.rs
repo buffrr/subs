@@ -71,8 +71,9 @@ async fn registry_loop(state: AppState) {
             tokio::time::sleep(REGISTRY_IDLE_INTERVAL).await;
             continue;
         };
+        let auth_token = state.config.registry_auth_token().ok().flatten();
 
-        match sync_once(&state, &endpoint).await {
+        match sync_once(&state, &endpoint, auth_token.as_deref()).await {
             Ok(outcome) => {
                 if outcome.pulled > 0 {
                     tracing::info!(
