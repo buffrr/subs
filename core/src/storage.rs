@@ -1008,9 +1008,14 @@ impl Storage {
                        AND (published_temp_at_tip IS NULL OR published_temp_at_tip != ?)",
                     params![tip],
                 )?,
+                // No tip: only certs published against some earlier tip are
+                // stale. A temp cert issued when there was already no tip is
+                // unchanged, and resetting it unconditionally made the publish
+                // loop republish the same cert on every pass.
                 None => conn.execute(
                     "UPDATE handles SET publish_status = NULL, published_temp_at_tip = NULL
-                     WHERE publish_status = 'temp'",
+                     WHERE publish_status = 'temp'
+                       AND published_temp_at_tip IS NOT NULL",
                     [],
                 )?,
             };
