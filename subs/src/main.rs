@@ -14,6 +14,7 @@
 
 mod background;
 mod config;
+mod logs;
 mod routes;
 mod state;
 
@@ -81,13 +82,15 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
+    // Initialize tracing. The capture layer feeds the Logs page and is
+    // installed here so nothing emitted after startup is missed.
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "subsd=info,tower_http=debug".into()),
         )
         .with(tracing_subscriber::fmt::layer())
+        .with(logs::capture_layer())
         .init();
 
     let cli = Cli::parse();
