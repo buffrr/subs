@@ -87,9 +87,14 @@ pub async fn sync_once(
 
     tracing::info!("Pulled {} pending handles from registry", pending.handles.len());
 
-    let mut requests = Vec::new();
     let mut errors = Vec::new();
-    let mut pulled_handles = Vec::new();
+
+    // Group by space before staging. add_requests aborts the whole call if any
+    // one space can't be loaded — an unknown space, a wallet that can't operate
+    // it — so batching every space together lets one bad handle sink handles
+    // that would otherwise stage fine.
+    let mut by_space: std::collections::HashMap<String, Vec<(String, subs_core::HandleRequest)>> =
+        std::collections::HashMap::new();
 
     for handle in &pending.handles {
         let handle_name: spaces_protocol::sname::SName = match handle.handle.parse() {
@@ -100,40 +105,58 @@ pub async fn sync_once(
             }
         };
 
-        requests.push(subs_core::HandleRequest {
-            handle: handle_name,
-            script_pubkey: handle.script_pubkey.clone(),
-            dev_private_key: None,
-        });
-        pulled_handles.push(handle.handle.clone());
+        let space = match handle_name.space() {
+            Some(s) => s.to_string(),
+            None => {
+                errors.push(format!("{}: handle has no space", handle.handle));
+                continue;
+            }
+        };
+
+        by_space.entry(space).or_default().push((
+            handle.handle.clone(),
+            subs_core::HandleRequest {
+                handle: handle_name,
+                script_pubkey: handle.script_pubkey.clone(),
+                dev_private_key: None,
+            },
+        ));
     }
 
-    let staged = if !requests.is_empty() {
+    let mut staged = 0;
+    let mut to_ack: Vec<String> = Vec::new();
+
+    for (space, entries) in by_space {
+        let (names, requests): (Vec<String>, Vec<subs_core::HandleRequest>) =
+            entries.into_iter().unzip();
+
         match state.operator.add_requests(requests).await {
             Ok(result) => {
-                tracing::info!("Staged {} handles", result.total_added);
+                tracing::info!("[{}] Staged {} handles", space, result.total_added);
                 for space_result in &result.by_space {
                     for skip in &space_result.skipped {
                         tracing::info!("Skipped: {} ({:?})", skip.handle, skip.reason);
                     }
                 }
-                result.total_added
+                staged += result.total_added;
+                // Skips are settled outcomes (already staged, already
+                // committed, taken by another spk), so they're acked too —
+                // leaving them pending would re-pull them forever.
+                to_ack.extend(names);
             }
             Err(e) => {
-                errors.push(format!("Failed to stage handles: {}", e));
-                0
+                // Deliberately not acked. Staging never happened, so acking
+                // would mark them done at the registry and lose them; leaving
+                // them pending means a fixed operator config picks them up.
+                errors.push(format!("{}: failed to stage: {}", space, e));
             }
         }
-    } else {
-        0
-    };
+    }
 
-    // Acknowledge everything we pulled, including handles that were already
-    // staged — a failed ack leaves them Pending at the registry, and the next
-    // cycle re-pulls and re-acks them (add_requests dedupes), so this
-    // self-heals as long as we keep acking what we pulled.
-    if !pulled_handles.is_empty() {
-        if let Err(e) = ack(&client, base, auth_token, &pulled_handles).await {
+    // A failed ack leaves handles Pending at the registry, and the next cycle
+    // re-pulls and re-acks them (add_requests dedupes), so this self-heals.
+    if !to_ack.is_empty() {
+        if let Err(e) = ack(&client, base, auth_token, &to_ack).await {
             // Not fatal: staging already succeeded locally.
             tracing::warn!("Failed to acknowledge handles to registry: {}", e);
             errors.push(format!("ack failed: {}", e));
