@@ -16,11 +16,13 @@ const POLL_INTERVAL: Duration = Duration::from_secs(10);
 /// Interval between polls when waiting for a prover job to complete.
 const JOB_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
-/// Interval between registry loop iterations when there's nothing to do.
-const REGISTRY_IDLE_INTERVAL: Duration = Duration::from_secs(30);
-
-/// Interval used while there are still certificates left to publish.
-const REGISTRY_WORK_INTERVAL: Duration = Duration::from_secs(5);
+/// Interval between registry loop iterations.
+///
+/// Polling this often is cheap: it's one GET against the operator's own
+/// registry, and the publish step below short-circuits on a local query when
+/// there's nothing to send. Relay traffic is paced by MESSAGE_SPACING rather
+/// than by this interval, so tightening it doesn't affect the relay.
+const REGISTRY_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Minimum gap between two publishes.
 ///
@@ -68,7 +70,7 @@ async fn registry_loop(state: AppState) {
         let endpoint = state.config.registry_endpoint().ok().flatten();
 
         let (Some(endpoint), true) = (endpoint, enabled) else {
-            tokio::time::sleep(REGISTRY_IDLE_INTERVAL).await;
+            tokio::time::sleep(REGISTRY_POLL_INTERVAL).await;
             continue;
         };
         let auth_token = state.config.registry_auth_token().ok().flatten();
@@ -94,7 +96,6 @@ async fn registry_loop(state: AppState) {
         // Publish one batch per space per iteration, spacing the sends so the
         // message rate stays inside the relay's per-IP bucket no matter how
         // many spaces are being drained at once.
-        let mut more_to_publish = false;
         let mut sent_any = false;
         for space in &state.operator.list_spaces() {
             if sent_any {
@@ -115,24 +116,24 @@ async fn registry_loop(state: AppState) {
                         published,
                         remaining
                     );
-                    if remaining > 0 {
-                        more_to_publish = true;
-                    }
                 }
                 Err(e) => {
-                    // Includes the case where fabric isn't configured, which
-                    // is a permanent condition rather than a transient error.
-                    tracing::debug!("[{}] Publish skipped: {}", space, e);
+                    // A missing fabric is a permanent, expected configuration
+                    // state and would otherwise warn on every iteration.
+                    // Anything else is a real failure and has to be visible —
+                    // logging these at debug hid a publish that was failing
+                    // every cycle while the UI just showed a stuck count.
+                    let msg = e.to_string();
+                    if msg.contains("fabric") {
+                        tracing::debug!("[{}] Publish skipped: {}", space, msg);
+                    } else {
+                        tracing::warn!("[{}] Publish failed: {}", space, msg);
+                    }
                 }
             }
         }
 
-        let interval = if more_to_publish {
-            REGISTRY_WORK_INTERVAL
-        } else {
-            REGISTRY_IDLE_INTERVAL
-        };
-        tokio::time::sleep(interval).await;
+        tokio::time::sleep(REGISTRY_POLL_INTERVAL).await;
     }
 }
 
