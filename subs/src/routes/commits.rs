@@ -338,6 +338,11 @@ pub struct PipelineResponse {
     pub prover_configured: bool,
     /// Whether a proving job is currently in flight on the prover
     pub proving_job_active: bool,
+    /// Which proof of the commitment is next (1-based), when proving.
+    pub proof_index: Option<usize>,
+    /// How many proofs this commitment needs in total: the first commitment
+    /// after genesis needs only a step, later ones need step + fold.
+    pub proof_total: Option<usize>,
 }
 
 pub async fn get_pipeline_status(
@@ -366,11 +371,21 @@ pub async fn get_pipeline_status(
     // Check if there's an active proving job by looking for a job key in config.
     // The job key uses the commitment's SQLite row id from the proving request,
     // matching the format used by push_to_prover and the background loop.
-    let proving_job_active = if status.commitment_idx.is_some() {
+    // Also report which proof of this commitment is next. count_pending_proofs
+    // charges a fold only from idx >= 2, so the first commitment after genesis
+    // is a single step proof and later ones are step + fold.
+    let mut proof_index = None;
+    let mut proof_total = None;
+
+    let proving_job_active = if let Some(idx) = status.commitment_idx {
         if let Ok(Some(req)) = state.operator.get_next_proving_request(&space_label).await {
             let cid = req.commitment_id();
             let is_fold = matches!(&req, subs_types::ProvingRequest::Fold { .. });
             let kind = if is_fold { "fold" } else { "step" };
+
+            proof_total = Some(if idx >= 2 { 2 } else { 1 });
+            proof_index = Some(if is_fold { 2 } else { 1 });
+
             let job_key = format!("job:{}:{}:{}", space, cid, kind);
             state.config.get(&job_key).unwrap_or(None).is_some()
         } else {
@@ -384,5 +399,7 @@ pub async fn get_pipeline_status(
         status,
         prover_configured,
         proving_job_active,
+        proof_index,
+        proof_total,
     }))
 }

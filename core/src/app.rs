@@ -1303,7 +1303,13 @@ impl Operator {
             };
 
         // has_pending is true until fully done (published)
-        let has_pending = !is_done;
+        // Publishing does not block the next commitment. broadcast/confirmed/
+        // finalized are on-chain and strictly sequential — two commitments
+        // cannot race — but publishing is downstream distribution of an
+        // already-final commitment. The background loop publishes on its own
+        // timer, and publish_certs selects across commitments, so a later
+        // commitment's certificates are simply picked up by the same sweep.
+        let has_pending = !is_done && current_step.as_deref() != Some("published");
 
         // Reset stale temp certs when the on-chain tip has changed,
         // so handles published against an old tip get republished
