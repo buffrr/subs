@@ -40,6 +40,15 @@ struct Cli {
     #[arg(long, default_value = "8888")]
     server_port: u16,
 
+    /// Skip startup calibration (for --server mode).
+    ///
+    /// Calibration proves a small batch to measure throughput, and the server
+    /// does not accept connections until it finishes — including /health. On a
+    /// short-lived GPU pod that delay is billed on every cold start, so skip it
+    /// when estimates aren't needed. Also settable via PROVER_NO_CALIBRATE.
+    #[arg(long)]
+    no_calibrate: bool,
+
     #[command(subcommand)]
     cmd: Option<Commands>,
 }
@@ -80,7 +89,9 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if cli.server {
-        subs_prover::server::run_server(cli.server_port).await?;
+        let no_calibrate = cli.no_calibrate
+            || std::env::var("PROVER_NO_CALIBRATE").is_ok_and(|v| !v.is_empty() && v != "0");
+        subs_prover::server::run_server(cli.server_port, no_calibrate).await?;
         return Ok(());
     }
 
@@ -160,7 +171,10 @@ fn compress(input: &CompressInput) -> Result<Vec<u8>> {
 }
 
 fn run_bench(existing: usize, insert: usize) -> Result<()> {
-    eprintln!("Building tree with {} existing handles, {} inserts...", existing, insert);
+    eprintln!(
+        "Building tree with {} existing handles, {} inserts...",
+        existing, insert
+    );
     let start = std::time::Instant::now();
     let request = subs_prover::build_bench_request(existing, insert)?;
     eprintln!("Request built in {:.2}s", start.elapsed().as_secs_f64());
@@ -181,15 +195,22 @@ fn run_bench(existing: usize, insert: usize) -> Result<()> {
         }
     };
 
-    eprintln!("Estimating proof for {} handles inserted into tree of {}...", insert, existing);
+    eprintln!(
+        "Estimating proof for {} handles inserted into tree of {}...",
+        insert, existing
+    );
     let estimate = prover.estimate(&request, calibration.as_ref())?;
 
     eprintln!("\n=== Estimate ===");
     eprintln!("Total user cycles:    {}", estimate.total_cycles);
-    eprintln!("Total proving cycles: {} (padded)", estimate.total_proving_cycles);
+    eprintln!(
+        "Total proving cycles: {} (padded)",
+        estimate.total_proving_cycles
+    );
     eprintln!("Segments:             {}", estimate.segments);
     for (i, seg) in estimate.segment_details.iter().enumerate() {
-        let time_str = seg.estimated_seconds
+        let time_str = seg
+            .estimated_seconds
             .map(|s| format!("{:.2}s", s))
             .unwrap_or_else(|| "n/a".into());
         eprintln!(

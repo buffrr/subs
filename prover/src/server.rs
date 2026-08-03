@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Request, State},
+    extract::{DefaultBodyLimit, Path, Request, State},
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -101,7 +101,20 @@ pub struct ErrorResponse {
 }
 
 /// Start the prover server
-pub async fn run_server(port: u16) -> anyhow::Result<()> {
+/// Maximum accepted request body.
+///
+/// Proving requests scale with the batch: the zk input alone is 64 bytes per
+/// handle, so a 50k-handle commitment is ~3 MB before the exclusion proof, and
+/// axum's 2 MB default rejects it with a 413 that reads like a prover fault.
+/// Bodies are buffered in memory, so this is a memory bound as much as a
+/// policy one — generous rather than tight, since the failure mode of setting
+/// it too low is a rejected commitment, and PROVER_AUTH_TOKEN gates the port.
+///
+/// Kept in step with MAX_BODY_BYTES in the runpod proxy: whichever hop has the
+/// lower ceiling is the one that 413s.
+const MAX_BODY_BYTES: usize = 512 * 1024 * 1024;
+
+pub async fn run_server(port: u16, no_calibrate: bool) -> anyhow::Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -116,28 +129,34 @@ pub async fn run_server(port: u16) -> anyhow::Result<()> {
     // Create shared state
     let state = Arc::new(ServerState::new(tx));
 
-    // Calibrate proving throughput on startup
-    tracing::info!("Calibrating proving throughput...");
-    let calibrate_state = state.clone();
-    let calibrate_handle = tokio::task::spawn_blocking(move || {
-        let prover = Prover::new();
-        prover.calibrate()
-    });
-    match calibrate_handle.await {
-        Ok(Ok(info)) => {
-            tracing::info!(
-                "Calibration complete: {:.2}s per segment at po2={}, {:.0} cycles/sec",
-                info.seconds_per_segment,
-                info.calibration_po2,
-                info.cycles_per_sec,
-            );
-            *calibrate_state.calibration.write().await = Some(info);
-        }
-        Ok(Err(e)) => {
-            tracing::warn!("Calibration failed (estimates will be unavailable): {}", e);
-        }
-        Err(e) => {
-            tracing::warn!("Calibration task panicked: {}", e);
+    // Calibrate proving throughput on startup. This blocks the listener, so
+    // /health stays unanswered until it completes — deliberate, since an
+    // estimate is useless before it, but billable on a short-lived pod.
+    if no_calibrate {
+        tracing::info!("Calibration skipped (--no-calibrate); /estimate will be unavailable");
+    } else {
+        tracing::info!("Calibrating proving throughput...");
+        let calibrate_state = state.clone();
+        let calibrate_handle = tokio::task::spawn_blocking(move || {
+            let prover = Prover::new();
+            prover.calibrate()
+        });
+        match calibrate_handle.await {
+            Ok(Ok(info)) => {
+                tracing::info!(
+                    "Calibration complete: {:.2}s per segment at po2={}, {:.0} cycles/sec",
+                    info.seconds_per_segment,
+                    info.calibration_po2,
+                    info.cycles_per_sec,
+                );
+                *calibrate_state.calibration.write().await = Some(info);
+            }
+            Ok(Err(e)) => {
+                tracing::warn!("Calibration failed (estimates will be unavailable): {}", e);
+            }
+            Err(e) => {
+                tracing::warn!("Calibration task panicked: {}", e);
+            }
         }
     }
 
@@ -150,7 +169,9 @@ pub async fn run_server(port: u16) -> anyhow::Result<()> {
     // Optional bearer-token auth. If PROVER_AUTH_TOKEN is set, every route
     // (including /health) requires `Authorization: Bearer <token>` — that
     // way a successful /health probe also confirms auth is wired correctly.
-    let auth_token = std::env::var("PROVER_AUTH_TOKEN").ok().filter(|s| !s.is_empty());
+    let auth_token = std::env::var("PROVER_AUTH_TOKEN")
+        .ok()
+        .filter(|s| !s.is_empty());
     if auth_token.is_some() {
         tracing::info!("PROVER_AUTH_TOKEN set, requiring bearer auth on all routes");
     }
@@ -161,7 +182,8 @@ pub async fn run_server(port: u16) -> anyhow::Result<()> {
         .route("/estimate", post(submit_estimate))
         .route("/compress", post(submit_compress))
         .route("/jobs/:job_id", get(get_job_status))
-        .route("/jobs/:job_id/receipt", get(get_job_receipt));
+        .route("/jobs/:job_id/receipt", get(get_job_receipt))
+        .route("/calibration", get(get_calibration));
     if let Some(token) = auth_token {
         app = app.layer(middleware::from_fn(move |req: Request, next: Next| {
             let token = token.clone();
@@ -170,6 +192,7 @@ pub async fn run_server(port: u16) -> anyhow::Result<()> {
     }
 
     let app = app
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(TraceLayer::new_for_http())
         .layer(
             CorsLayer::new()
@@ -192,6 +215,29 @@ pub async fn run_server(port: u16) -> anyhow::Result<()> {
 }
 
 /// Health check endpoint
+/// GET /calibration - Measured proving throughput of this machine.
+///
+/// The number that characterises a GPU for cost purposes: cost per proof is
+/// total_proving_cycles / cycles_per_sec. Previously only reachable by reading
+/// the startup log line or running `subs-prover bench` on the box.
+///
+/// 503 when calibration was skipped or failed.
+async fn get_calibration(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+    match state.calibration.read().await.clone() {
+        Some(info) => Json(serde_json::json!({
+            "seconds_per_segment": info.seconds_per_segment,
+            "calibration_po2": info.calibration_po2,
+            "cycles_per_sec": info.cycles_per_sec,
+        }))
+        .into_response(),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "calibration unavailable (skipped or failed)",
+        )
+            .into_response(),
+    }
+}
+
 async fn health() -> &'static str {
     "ok"
 }
@@ -435,10 +481,7 @@ async fn get_job_receipt(
                 tracing::info!("Job {} receipt pulled, removing job", job_id);
                 (
                     StatusCode::OK,
-                    [(
-                        axum::http::header::CONTENT_TYPE,
-                        "application/octet-stream",
-                    )],
+                    [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
                     receipt,
                 )
                     .into_response()

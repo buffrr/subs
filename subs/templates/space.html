@@ -225,7 +225,10 @@ const spaceUrl = `/spaces/${encodeURIComponent(space)}`;
 let currentPage = 1;
 let perPage = 20;
 let currentPipeline = null;
-let provingPollActive = false;
+// Handle for the pipeline auto-refresh timer. Kept as a handle rather than a
+// boolean so it can be cleared and re-armed on every pass: a flag that is only
+// ever set true stops the chain after a single tick.
+let pipelinePollTimer = null;
 let currentFilter = null;
 let searchTimeout = null;
 let selectedHandles = new Set();
@@ -297,6 +300,23 @@ async function refreshPipeline() {
 
         updatePublishBar(j.unpublished || 0);
 
+        // Re-arm before the has_pending branch below: publishing no longer
+        // sets has_pending, so that branch returns early and would otherwise
+        // never reach this. Poll while the pipeline advances on its own — the
+        // prover working, the chain confirming, the background loop
+        // publishing. 'broadcast' is excluded; it waits on the operator.
+        if (pipelinePollTimer) {
+            clearTimeout(pipelinePollTimer);
+            pipelinePollTimer = null;
+        }
+        if ((j.steps && j.steps.proving === 'in_progress' && j.prover_configured)
+            || j.current_step === 'confirmed'
+            || j.current_step === 'finalized'
+            || j.current_step === 'published'
+            || (j.unpublished || 0) > 0) {
+            pipelinePollTimer = setTimeout(refreshPipeline, 5000);
+        }
+
         if (!j.has_pending) {
             const sc = j.staged_count || 0;
             if (sc > 0) {
@@ -323,14 +343,6 @@ async function refreshPipeline() {
         renderActions(j);
         $('provingEndpoint').innerHTML = '';
 
-        if (j.steps.proving === 'in_progress' && j.prover_configured) {
-            if (!provingPollActive) {
-                provingPollActive = true;
-                setTimeout(refreshPipeline, 5000);
-            }
-        } else {
-            provingPollActive = false;
-        }
         loadHandles(currentPage);
     } catch (e) {
         $('pipelineStepper').innerHTML = `<span style="color:var(--red);font-size:13px">${e.message}</span>`;
@@ -401,6 +413,11 @@ function renderActions(r) {
     let h = '';
 
     if (r.current_step === 'proving') {
+        // "1 of 2" / "2 of 2" so an interrupted run and a normal handoff
+        // between the step and fold proofs don't look identical.
+        const proofLabel = (r.proof_index && r.proof_total && r.proof_total > 1)
+            ? ` ${r.proof_index} of ${r.proof_total}`
+            : '';
         if (r.prover_configured) {
             if (r.proving_job_active) {
                 const total = r.pending_proofs || 0;
@@ -408,7 +425,7 @@ function renderActions(r) {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" class="animate-spin">
                         <circle opacity="0.25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
                         <path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                    <span style="font-size:13px">Generating proof...
+                    <span style="font-size:13px">Generating proof${proofLabel}...
                         <span style="color:var(--text-muted)">(${total} pending)</span></span></div>`;
             }
             if (r.estimate) {
@@ -424,7 +441,7 @@ function renderActions(r) {
             }
             if (!r.proving_job_active) {
                 h += `<div class="flex gap-3" style="margin-top:10px">
-                    <button onclick="startProving()" class="btn-primary">Prove</button>
+                    <button onclick="startProving()" class="btn-primary">Prove${proofLabel ? ' ' + proofLabel.trim() : ''}</button>
                     <button onclick="rollbackLocal()" class="btn-secondary">Rollback</button></div>`;
             } else {
                 h += '<button onclick="rollbackLocal()" class="btn-sm" style="margin-top:10px">Rollback Local</button>';
