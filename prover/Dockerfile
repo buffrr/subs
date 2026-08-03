@@ -87,13 +87,30 @@ COPY . .
 RUN cargo build --locked --release -p subs-prover --features cuda --bin subs-prover
 
 # ----- Runtime stage -----------------------------------------------------
-FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
+#
+# `base`, not `runtime`: the binary's only CUDA dependency is libcuda.so.1,
+# which the NVIDIA container runtime injects from the host driver and which no
+# CUDA image ships. risc0/sppark compile their own kernels and use the driver
+# API, so nothing links cudart, cuBLAS, cuFFT, cuSPARSE, cuSOLVER or NCCL —
+# the entire ~1.3 GB of math libraries in `runtime` was unused. `base` still
+# sets NVIDIA_VISIBLE_DEVICES / NVIDIA_DRIVER_CAPABILITIES, which is what makes
+# the runtime inject the driver, so it cannot be reduced to plain ubuntu.
+#
+# Verified by reading DT_NEEDED off the published amd64 binary:
+#   ld-linux-x86-64.so.2  libc.so.6  libcuda.so.1
+#   libgcc_s.so.1         libm.so.6  libstdc++.so.6
+FROM nvidia/cuda:12.4.0-base-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# libstdc++6 / libgcc-s1 are pulled in explicitly rather than relied on: they
+# are the binary's remaining non-libc dependencies and `base` is thinner than
+# `runtime`, so leaving them implicit is a needless bet.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         libssl3 \
+        libstdc++6 \
+        libgcc-s1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/target/release/subs-prover /usr/local/bin/subs-prover
